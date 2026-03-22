@@ -21,4 +21,8 @@ class NativeAudioRecorder {
   Future<void> stopRecording() async {
     await _control.invokeMethod('stopRecording');
   }
+
+  Future<void> setWindowsCaptureMode(String mode) async {
+    await _control.invokeMethod('setCaptureMode', mode);
+  }
 }

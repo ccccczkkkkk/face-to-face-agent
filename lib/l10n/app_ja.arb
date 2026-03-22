@@ -1,0 +1,76 @@
+{
+  "@@locale": "ja",
+  "appTitle": "Face Agent MVP",
+  "homeTitle": "会話一覧",
+  "homeEmpty": "まだ会話はありません。右下のボタンから新しく作成できます。",
+  "sessionEdit": "編集",
+  "sessionDelete": "削除",
+  "sessionEditDialogTitle": "会話を編集",
+  "sessionCreateDialogTitle": "新しい会話",
+  "sessionDeleteDialogTitle": "会話を削除",
+  "sessionModeConversation": "会話モード",
+  "sessionModeSubtitle": "字幕モード",
+  "sessionDeleteConfirm": "「{title}」を削除しますか？",
+  "@sessionDeleteConfirm": {
+    "placeholders": {
+      "title": {}
+    }
+  },
+  "fieldTitle": "タイトル",
+  "fieldOutline": "概要",
+  "actionCancel": "キャンセル",
+  "actionSave": "保存",
+  "actionConfirm": "決定",
+  "actionDelete": "削除",
+  "conversationFallbackTitle": "Conversation {index}",
+  "@conversationFallbackTitle": {
+    "placeholders": {
+      "index": {}
+    }
+  },
+  "languageSystem": "システムに従う",
+  "languageChinese": "中文",
+  "languageJapanese": "日本語",
+  "settingsTitle": "設定",
+  "createModeConversation": "会話モード",
+  "createModeConversationHint": "タイトルとアウトラインを編集してから会話ページへ進みます",
+  "createModeSubtitle": "字幕モード",
+  "createModeSubtitleHint": "そのままサイド字幕ページへ進みます",
+  "createModeTitle": "新規モードを選択",
+  "createModeDescription": "通常の会話モードにするか、サイド字幕モードにするかを選びます。",
+  "sessionPageTitle": "WS Minimal Test",
+  "recordingSettings": "録音設定",
+  "recordingModeSystemAudio": "システム音声",
+  "recordingModeChromeAudio": "Chrome 音声",
+  "buttonStartFlutterMic": "Flutter マイク開始",
+  "buttonStopFlutterMic": "Flutter マイク停止",
+  "buttonStartSystemAudio": "システム音声開始",
+  "buttonStopSystemAudio": "システム音声停止",
+  "buttonStartChromeAudio": "Chrome 音声開始",
+  "buttonStopChromeAudio": "Chrome 音声停止",
+  "buttonStartNativeMic": "ネイティブマイク開始",
+  "buttonStopNativeMic": "ネイティブマイク停止",
+  "buttonConnectConfig": "接続して設定送信",
+  "buttonDisconnect": "切断",
+  "buttonConnectShort": "接続して設定",
+  "labelJapanese": "日本語文字起こし",
+  "labelChinese": "中国語翻訳",
+  "labelNextReply": "次の返答候補",
+  "labelDebugLogs": "デバッグログ",
+  "labelSideCaptionMode": "サイド字幕モード",
+  "sideCaptionHint": "右上メニューからシステム音声と Chrome 音声を切り替えできます。",
+  "statusConnected": "接続中 - {mode}",
+  "@statusConnected": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "statusReady": "待機中 - {mode}",
+  "@statusReady": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "emptyPlaceholder": "（内容はまだありません）",
+  "noLogsYet": "まだログはありません"
+}
