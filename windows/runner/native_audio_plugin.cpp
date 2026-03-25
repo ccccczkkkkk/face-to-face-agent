@@ -23,6 +23,8 @@ namespace {
 constexpr uint32_t kTargetSampleRate = 16000;
 constexpr size_t kTargetChunkBytes = 640;
 constexpr DWORD kActivationTimeoutMs = 5000;
+constexpr UINT kAudioChunkMessage = WM_APP + 100;
+constexpr wchar_t kNativeAudioWindowClassName[] = L"FaceAgentNativeAudioWindow";
 
 int16_t FloatToPcm16(float sample) {
   const float clamped = std::clamp(sample, -1.0f, 1.0f);
@@ -511,10 +513,13 @@ NativeAudioPlugin::NativeAudioPlugin(flutter::FlutterEngine* engine) {
             event_sink_.reset();
             return nullptr;
           }));
+
+  CreateMessageWindow();
 }
 
 NativeAudioPlugin::~NativeAudioPlugin() {
   capture_.Stop();
+  DestroyMessageWindow();
 }
 
 void NativeAudioPlugin::HandleMethodCall(
@@ -582,11 +587,83 @@ void NativeAudioPlugin::HandleMethodCall(
 }
 
 void NativeAudioPlugin::SendAudioChunk(const std::vector<uint8_t>& bytes) {
+  {
+    std::lock_guard<std::mutex> lock(event_sink_mutex_);
+    if (!event_sink_) {
+      return;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(pending_audio_mutex_);
+    pending_audio_chunks_.push(bytes);
+  }
+
+  if (message_window_ != nullptr) {
+    PostMessage(message_window_, kAudioChunkMessage, 0, 0);
+  }
+}
+
+void NativeAudioPlugin::DispatchPendingAudioChunks() {
+  std::queue<std::vector<uint8_t>> chunks;
+  {
+    std::lock_guard<std::mutex> lock(pending_audio_mutex_);
+    std::swap(chunks, pending_audio_chunks_);
+  }
+
   std::lock_guard<std::mutex> lock(event_sink_mutex_);
   if (!event_sink_) {
     return;
   }
-  event_sink_->Success(flutter::EncodableValue(bytes));
+
+  while (!chunks.empty()) {
+    event_sink_->Success(flutter::EncodableValue(chunks.front()));
+    chunks.pop();
+  }
+}
+
+bool NativeAudioPlugin::CreateMessageWindow() {
+  WNDCLASSW window_class = {};
+  window_class.lpfnWndProc = NativeAudioPlugin::MessageWindowProc;
+  window_class.hInstance = GetModuleHandle(nullptr);
+  window_class.lpszClassName = kNativeAudioWindowClassName;
+
+  RegisterClassW(&window_class);
+
+  message_window_ = CreateWindowExW(
+      0, kNativeAudioWindowClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
+      nullptr, GetModuleHandle(nullptr), this);
+
+  return message_window_ != nullptr;
+}
+
+void NativeAudioPlugin::DestroyMessageWindow() {
+  if (message_window_ != nullptr) {
+    DestroyWindow(message_window_);
+    message_window_ = nullptr;
+  }
+}
+
+LRESULT CALLBACK NativeAudioPlugin::MessageWindowProc(HWND hwnd, UINT message,
+                                                      WPARAM wparam,
+                                                      LPARAM lparam) {
+  if (message == WM_NCCREATE) {
+    auto* create_struct = reinterpret_cast<CREATESTRUCTW*>(lparam);
+    auto* plugin =
+        reinterpret_cast<NativeAudioPlugin*>(create_struct->lpCreateParams);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(plugin));
+    return TRUE;
+  }
+
+  auto* plugin = reinterpret_cast<NativeAudioPlugin*>(
+      GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  if (plugin != nullptr && message == kAudioChunkMessage) {
+    plugin->DispatchPendingAudioChunks();
+    return 0;
+  }
+
+  return DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
 bool NativeAudioPlugin::IsProcessExecutableName(

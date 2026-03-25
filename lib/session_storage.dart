@@ -39,4 +39,17 @@ class SessionStorage {
     );
     await file.writeAsString(encoded, flush: true);
   }
+
+  static Future<void> saveSession(ConversationSession session) async {
+    final sessions = await loadSessions();
+    final index = sessions.indexWhere((item) => item.id == session.id);
+
+    if (index >= 0) {
+      sessions[index] = session;
+    } else {
+      sessions.insert(0, session);
+    }
+
+    await saveSessions(sessions);
+  }
 }

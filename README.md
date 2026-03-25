@@ -10,6 +10,8 @@ This project is currently focused on a Windows-friendly sidebar experience for f
 flutter pub get
 ```
 
+Create a local `.env` file from `.env.example` and fill in your own server values before running.
+
 ## Run
 
 Run on Windows:

@@ -17,6 +17,12 @@ ios/.symlinks/
 
 # Logs
 *.log
+.env
+.env.*
+!.env.example
+face_server/
+set_content_test.txt
+utf8_nobom_test.txt
 
 # macOS
 .DS_Store

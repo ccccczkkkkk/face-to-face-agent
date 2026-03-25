@@ -39,6 +39,7 @@ dependencies:
   web_socket_channel: ^2.4.0
   permission_handler: ^11.3.1
   audio_streamer: ^4.2.2
+  flutter_dotenv: ^5.2.1
   path_provider: ^2.1.4
 
 dev_dependencies:
@@ -58,6 +59,8 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
   generate: true
+  assets:
+    - .env
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

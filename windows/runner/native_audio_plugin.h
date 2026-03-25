@@ -11,6 +11,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <queue>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -73,6 +74,11 @@ class NativeAudioPlugin {
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void SendAudioChunk(const std::vector<uint8_t>& bytes);
+  void DispatchPendingAudioChunks();
+  bool CreateMessageWindow();
+  void DestroyMessageWindow();
+  static LRESULT CALLBACK MessageWindowProc(HWND hwnd, UINT message,
+                                            WPARAM wparam, LPARAM lparam);
   bool IsProcessExecutableName(DWORD process_id,
                                const std::wstring& executable_name) const;
   DWORD FindChromeAncestorProcessId(DWORD process_id) const;
@@ -87,6 +93,9 @@ class NativeAudioPlugin {
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>> pcm_channel_;
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
   std::mutex event_sink_mutex_;
+  std::queue<std::vector<uint8_t>> pending_audio_chunks_;
+  std::mutex pending_audio_mutex_;
+  HWND message_window_ = nullptr;
 };
 
 #endif  // RUNNER_NATIVE_AUDIO_PLUGIN_H_

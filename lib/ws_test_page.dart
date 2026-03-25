@@ -10,10 +10,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'app_config.dart';
 import 'audio_native.dart';
 import 'conversation_session.dart';
 import 'l10n/app_localizations.dart';
 import 'session_defaults.dart';
+import 'session_storage.dart';
 import 'windows_session_sidebar.dart';
 
 class WsTestPage extends StatefulWidget {
@@ -48,8 +50,18 @@ class _WsTestPageState extends State<WsTestPage> {
   static const _accentSoft = Color(0xFFE8E5F3);
   static const _accentText = Color(0xFF67627F);
   static const _shadowColor = Color(0x14111820);
-
-  final String vpsWsUrl = 'ws://150.65.61.47:8000/ws';
+  static const Map<String, String> _transcriptionLanguageLabels = {
+    'auto': 'Auto',
+    'ja': 'Japanese',
+    'en': 'English',
+    'zh': 'Chinese',
+    'ko': 'Korean',
+  };
+  static const Map<String, String> _translationLanguageLabels = {
+    'zh-Hans': 'Chinese',
+    'ja': 'Japanese',
+    'en': 'English',
+  };
 
   WebSocketChannel? _channel;
 
@@ -64,8 +76,11 @@ class _WsTestPageState extends State<WsTestPage> {
   final List<String> _suggestionHistory = [];
 
   String _jaCurrentLine = '';
+  String _transcriptionLanguage = 'auto';
+  String _translationLanguage = 'zh-Hans';
   WindowsRecordingMode _windowsRecordingMode =
       WindowsRecordingMode.systemLoopback;
+  Timer? _sessionPersistTimer;
 
   @override
   void initState() {
@@ -91,6 +106,29 @@ class _WsTestPageState extends State<WsTestPage> {
     widget.session.jaHistory = List.of(_jaHistory);
     widget.session.zhHistory = List.of(_zhHistory);
     widget.session.suggestionHistory = List.of(_suggestionHistory);
+  }
+
+  void _scheduleSessionPersist({Duration delay = const Duration(milliseconds: 600)}) {
+    _syncSession();
+    _sessionPersistTimer?.cancel();
+    _sessionPersistTimer = Timer(delay, () async {
+      try {
+        await SessionStorage.saveSession(widget.session);
+      } catch (e) {
+        debugPrint('Session autosave failed: $e');
+      }
+    });
+  }
+
+  Future<void> _flushSessionPersist() async {
+    _syncSession();
+    _sessionPersistTimer?.cancel();
+    _sessionPersistTimer = null;
+    try {
+      await SessionStorage.saveSession(widget.session);
+    } catch (e) {
+      debugPrint('Session save failed: $e');
+    }
   }
 
   final ScrollController _jaScrollController = ScrollController();
@@ -195,12 +233,28 @@ class _WsTestPageState extends State<WsTestPage> {
     return (pos.maxScrollExtent - pos.pixels) <= threshold;
   }
 
-  void _connect() {
+  void _showConnectionError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<bool> _connect() async {
+    final wsUrl = AppConfig.wsUrlForMode(widget.session.mode);
+    if (wsUrl.isEmpty) {
+      const message =
+          'Connect failed: WS_URL is missing. Please set it in .env';
+      _log(message);
+      _showConnectionError(message);
+      return false;
+    }
+
     try {
-      final ch = WebSocketChannel.connect(Uri.parse(vpsWsUrl));
+      final ch = WebSocketChannel.connect(Uri.parse(wsUrl));
       _channel = ch;
 
-      _log('Connecting to $vpsWsUrl ...');
+      _log('Connecting to $wsUrl ...');
 
       ch.stream.listen(
         (event) {
@@ -227,13 +281,16 @@ class _WsTestPageState extends State<WsTestPage> {
                   if (finalLine.isNotEmpty) {
                     _jaHistory.add(finalLine);
                     _zhHistory.add('');
+                    _scheduleSessionPersist();
                   }
                   _jaCurrentLine = '';
+                  _scheduleSessionPersist();
                 } else if (type == 'suggestion') {
                   final zh = (obj['zh_translation'] ?? '').toString();
 
                   if (zh.isNotEmpty && _zhHistory.isNotEmpty) {
                     _zhHistory[_zhHistory.length - 1] = zh;
+                    _scheduleSessionPersist();
                   }
 
                   final ns = obj['next_say'];
@@ -259,7 +316,16 @@ class _WsTestPageState extends State<WsTestPage> {
                     final block = lines.join('\n\n');
                     if (block.isNotEmpty) {
                       _suggestionHistory.add(block);
+                      _scheduleSessionPersist();
                     }
+                  }
+                } else if (type == 'subtitle_translation' ||
+                    type == 'translation') {
+                  final zh = (obj['translation'] ?? obj['zh_translation'] ?? '')
+                      .toString();
+                  if (zh.isNotEmpty && _zhHistory.isNotEmpty) {
+                    _zhHistory[_zhHistory.length - 1] = zh;
+                    _scheduleSessionPersist();
                   }
                 }
               });
@@ -278,18 +344,28 @@ class _WsTestPageState extends State<WsTestPage> {
         },
       );
 
+      await ch.ready.timeout(const Duration(seconds: 3));
+
       final cfg = {
         'type': 'config',
         'outline': _outlineCtl.text,
+        'mode': widget.session.mode.name,
+        'transcription_language': _transcriptionLanguage,
+        'translation_language': _translationLanguage,
       };
       ch.sink.add(jsonEncode(cfg));
       _log('SENT config');
 
       setState(() => _connected = true);
-      _syncSession();
+      _scheduleSessionPersist(delay: Duration.zero);
+      return true;
     } catch (e) {
+      _channel?.sink.close();
+      _channel = null;
       _log('Connect failed: $e');
       setState(() => _connected = false);
+      _showConnectionError('Server connection failed.');
+      return false;
     }
   }
 
@@ -303,7 +379,8 @@ class _WsTestPageState extends State<WsTestPage> {
   Future<void> _startPrimaryCapture() async {
     if (_supportsNativeMic) {
       if (!_connected) {
-        _connect();
+        final connected = await _connect();
+        if (!connected) return;
       }
       await _startNativeMic();
       if (!_isPrimaryRecordingOn && _connected) {
@@ -314,7 +391,8 @@ class _WsTestPageState extends State<WsTestPage> {
 
     if (_supportsFlutterMic) {
       if (!_connected) {
-        _connect();
+        final connected = await _connect();
+        if (!connected) return;
       }
       await _startFlutterMic();
       if (!_isPrimaryRecordingOn && _connected) {
@@ -369,7 +447,7 @@ class _WsTestPageState extends State<WsTestPage> {
 
   @override
   void dispose() {
-    _syncSession();
+    _flushSessionPersist();
     _jaScrollController.dispose();
     _zhScrollController.dispose();
     _suggestionScrollController.dispose();
@@ -680,8 +758,6 @@ class _WsTestPageState extends State<WsTestPage> {
   }
 
   Widget _buildDefaultBody() {
-    final l10n = AppLocalizations.of(context)!;
-
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -690,22 +766,36 @@ class _WsTestPageState extends State<WsTestPage> {
             child: ListView(
               children: [
                 _historyCard(
-                  title: l10n.labelJapanese,
+                  title: _transcriptionCardTitle,
                   items: _jaHistory,
                   currentLine: _jaCurrentLine,
                   controller: _jaScrollController,
                   height: 80,
+                  trailing: _buildLanguageDropdown(
+                    value: _transcriptionLanguage,
+                    labels: _transcriptionLanguageLabels,
+                    onChanged: (value) {
+                      setState(() => _transcriptionLanguage = value);
+                    },
+                  ),
                 ),
                 const SizedBox(height: 10),
                 _historyCard(
-                  title: l10n.labelChinese,
+                  title: _translationCardTitle,
                   items: _zhHistory,
                   controller: _zhScrollController,
                   height: 80,
+                  trailing: _buildLanguageDropdown(
+                    value: _translationLanguage,
+                    labels: _translationLanguageLabels,
+                    onChanged: (value) {
+                      setState(() => _translationLanguage = value);
+                    },
+                  ),
                 ),
                 const SizedBox(height: 10),
                 _historyCard(
-                  title: l10n.labelNextReply,
+                  title: AppLocalizations.of(context)!.labelNextReply,
                   items: _suggestionHistory,
                   controller: _suggestionScrollController,
                   height: 300,
@@ -726,19 +816,35 @@ class _WsTestPageState extends State<WsTestPage> {
       isRecording: _isPrimaryRecordingOn,
       recordingModeLabel: _windowsRecordingModeLabel,
       transcriptCard: _historyCard(
-        title: AppLocalizations.of(context)!.labelJapanese,
+        title: _transcriptionCardTitle,
         items: _jaHistory,
         currentLine: _jaCurrentLine,
         controller: _jaScrollController,
         height: null,
         compact: true,
+        trailing: _buildLanguageDropdown(
+          value: _transcriptionLanguage,
+          labels: _transcriptionLanguageLabels,
+          compact: true,
+          onChanged: (value) {
+            setState(() => _transcriptionLanguage = value);
+          },
+        ),
       ),
       translationCard: _historyCard(
-        title: AppLocalizations.of(context)!.labelChinese,
+        title: _translationCardTitle,
         items: _zhHistory,
         controller: _zhScrollController,
         height: null,
         compact: true,
+        trailing: _buildLanguageDropdown(
+          value: _translationLanguage,
+          labels: _translationLanguageLabels,
+          compact: true,
+          onChanged: (value) {
+            setState(() => _translationLanguage = value);
+          },
+        ),
       ),
       replyCard: _historyCard(
         title: AppLocalizations.of(context)!.labelNextReply,
@@ -804,6 +910,7 @@ class _WsTestPageState extends State<WsTestPage> {
     ScrollController? controller,
     double? height = 140,
     bool compact = false,
+    Widget? trailing,
   }) {
     final l10n = AppLocalizations.of(context)!;
     final bool hasCurrent = currentLine.isNotEmpty;
@@ -870,13 +977,23 @@ class _WsTestPageState extends State<WsTestPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: compact ? 12 : 16,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF2A2D38),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: compact ? 12 : 16,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF2A2D38),
+                    ),
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const SizedBox(width: 8),
+                  trailing,
+                ],
+              ],
             ),
             SizedBox(height: compact ? 4 : 8),
             if (height == null)
@@ -884,6 +1001,66 @@ class _WsTestPageState extends State<WsTestPage> {
             else
               historyContent,
           ],
+        ),
+      ),
+    );
+  }
+
+  String get _transcriptionCardTitle {
+    final base = AppLocalizations.of(context)!.labelJapanese;
+    final label =
+        _transcriptionLanguageLabels[_transcriptionLanguage] ?? _transcriptionLanguage;
+    return '$base · $label';
+  }
+
+  String get _translationCardTitle {
+    final label =
+        _translationLanguageLabels[_translationLanguage] ?? _translationLanguage;
+    return 'Translation · $label';
+  }
+
+  Widget _buildLanguageDropdown({
+    required String value,
+    required Map<String, String> labels,
+    required ValueChanged<String> onChanged,
+    bool compact = false,
+  }) {
+    return DropdownButtonHideUnderline(
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 6 : 8,
+          vertical: compact ? 0 : 2,
+        ),
+        decoration: BoxDecoration(
+          color: _surfaceMuted,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: DropdownButton<String>(
+          value: value,
+          isDense: true,
+          borderRadius: BorderRadius.circular(12),
+          style: TextStyle(
+            fontSize: compact ? 11 : 12,
+            color: const Color(0xFF4B4E5C),
+          ),
+          icon: Icon(
+            Icons.arrow_drop_down_rounded,
+            size: compact ? 16 : 18,
+            color: const Color(0xFF6A6C78),
+          ),
+          items: labels.entries
+              .map(
+                (entry) => DropdownMenuItem<String>(
+                  value: entry.key,
+                  child: Text(entry.value),
+                ),
+              )
+              .toList(),
+          onChanged: (next) {
+            if (next != null) {
+              onChanged(next);
+            }
+          },
         ),
       ),
     );
