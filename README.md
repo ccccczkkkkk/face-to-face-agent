@@ -1,6 +1,6 @@
 # A face-to-face communication assistance agent
 
-A Flutter client for language-learning support based on live audio capture, transcription, translation, and next-response suggestions.
+A Flutter client for language-learning support based on live audio capture, transcription, translation, next-response suggestions, and subtitle summaries.
 
 This project is currently focused on a Windows-friendly sidebar experience for following along with videos, lessons, or conversations in real time.
 
@@ -32,21 +32,26 @@ flutter run -d android
 - Windows desktop UI optimized as a vertical sidebar
 - Android native microphone capture path kept in place
 - Windows system audio capture implemented with native loopback
+- Windows audio pipeline tuned to `24kHz mono PCM16` for better realtime transcription compatibility
 - Session list with two entry types:
   - Conversation mode
   - Subtitle mode
-- Chinese / Japanese UI localization in progress
+- Chinese / Japanese / English UI localization
 
 ## Main Features
 
 - Capture audio and send PCM chunks to a WebSocket backend
 - Receive:
-  - Japanese transcript
-  - Chinese translation
-  - Suggested next reply
+  - transcript segments
+  - translation
+  - suggested next reply
+  - subtitle summaries
 - Save local session history
 - Create and manage sessions from the home page
 - Windows right-click session menu for edit/delete
+- Manual suggestion request flow in conversation mode
+- Subtitle-mode summary language switching
+- Copyable subtitle notes built from server-provided `note_source`
 
 ## Project Structure
 
@@ -64,6 +69,23 @@ flutter run -d android
 - Windows audio capture is designed around system/internal audio
 - Chrome process audio exists as an experimental mode, but system audio is the stable path for now
 
+## Subtitle Mode
+
+Subtitle mode is aimed at following videos or lessons in a narrow Windows sidebar.
+
+It currently supports:
+
+- live transcript and translation display
+- server-driven chunk summaries
+- summary language switching (`source` / `en` / `zh-Hans`)
+- local persistence of structured summary history
+- note copying from accumulated `note_source` text
+
+The summary panel is separate from conversation suggestions:
+
+- `conversation` mode keeps manual next-reply suggestions
+- `subtitle` mode uses the same panel area for rolling content summaries
+
 ## Data Storage
 
 Sessions are stored locally in `sessions.json` under the platform documents directory.
@@ -77,6 +99,7 @@ Each session currently stores:
 - Japanese history
 - Chinese history
 - suggestion history
+- structured summary history with multilingual summaries and `note_source`
 
 ## UI Direction
 
