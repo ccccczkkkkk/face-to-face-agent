@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/intl.dart' as intl;
 
+import 'app_localizations_en.dart';
 import 'app_localizations_ja.dart';
 import 'app_localizations_zh.dart';
 
@@ -94,6 +95,7 @@ abstract class AppLocalizations {
 
   /// A list of this localizations delegate's supported locales.
   static const List<Locale> supportedLocales = <Locale>[
+    Locale('en'),
     Locale('ja'),
     Locale('zh'),
   ];
@@ -107,13 +109,13 @@ abstract class AppLocalizations {
   /// No description provided for @homeTitle.
   ///
   /// In zh, this message translates to:
-  /// **'Conversations'**
+  /// **'会话'**
   String get homeTitle;
 
   /// No description provided for @homeEmpty.
   ///
   /// In zh, this message translates to:
-  /// **'还没有对话，点击右下角开始新建。'**
+  /// **'还没有会话，点击右下角按钮新建一个吧。'**
   String get homeEmpty;
 
   /// No description provided for @sessionEdit.
@@ -131,19 +133,19 @@ abstract class AppLocalizations {
   /// No description provided for @sessionEditDialogTitle.
   ///
   /// In zh, this message translates to:
-  /// **'编辑对话'**
+  /// **'编辑会话'**
   String get sessionEditDialogTitle;
 
   /// No description provided for @sessionCreateDialogTitle.
   ///
   /// In zh, this message translates to:
-  /// **'新建对话'**
+  /// **'新建会话'**
   String get sessionCreateDialogTitle;
 
   /// No description provided for @sessionDeleteDialogTitle.
   ///
   /// In zh, this message translates to:
-  /// **'删除对话'**
+  /// **'删除会话'**
   String get sessionDeleteDialogTitle;
 
   /// No description provided for @sessionModeConversation.
@@ -161,7 +163,7 @@ abstract class AppLocalizations {
   /// No description provided for @sessionDeleteConfirm.
   ///
   /// In zh, this message translates to:
-  /// **'确认删除“{title}”吗？'**
+  /// **'确定要删除“{title}”吗？'**
   String sessionDeleteConfirm(Object title);
 
   /// No description provided for @fieldTitle.
@@ -191,7 +193,7 @@ abstract class AppLocalizations {
   /// No description provided for @actionConfirm.
   ///
   /// In zh, this message translates to:
-  /// **'确定'**
+  /// **'确认'**
   String get actionConfirm;
 
   /// No description provided for @actionDelete.
@@ -206,6 +208,12 @@ abstract class AppLocalizations {
   /// **'Conversation {index}'**
   String conversationFallbackTitle(Object index);
 
+  /// No description provided for @languageAuto.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动'**
+  String get languageAuto;
+
   /// No description provided for @languageSystem.
   ///
   /// In zh, this message translates to:
@@ -218,11 +226,29 @@ abstract class AppLocalizations {
   /// **'中文'**
   String get languageChinese;
 
+  /// No description provided for @languageEnglish.
+  ///
+  /// In zh, this message translates to:
+  /// **'英文'**
+  String get languageEnglish;
+
   /// No description provided for @languageJapanese.
   ///
   /// In zh, this message translates to:
-  /// **'日本語'**
+  /// **'日文'**
   String get languageJapanese;
+
+  /// No description provided for @languageKorean.
+  ///
+  /// In zh, this message translates to:
+  /// **'韩文'**
+  String get languageKorean;
+
+  /// No description provided for @languageSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'原文'**
+  String get languageSource;
 
   /// No description provided for @settingsTitle.
   ///
@@ -239,7 +265,7 @@ abstract class AppLocalizations {
   /// No description provided for @createModeConversationHint.
   ///
   /// In zh, this message translates to:
-  /// **'先编辑标题和提纲，再进入会话页面'**
+  /// **'填写标题和提纲，进入对话练习页面。'**
   String get createModeConversationHint;
 
   /// No description provided for @createModeSubtitle.
@@ -251,7 +277,7 @@ abstract class AppLocalizations {
   /// No description provided for @createModeSubtitleHint.
   ///
   /// In zh, this message translates to:
-  /// **'直接进入侧边字幕页面'**
+  /// **'直接进入侧边字幕页面。'**
   String get createModeSubtitleHint;
 
   /// No description provided for @createModeTitle.
@@ -263,7 +289,7 @@ abstract class AppLocalizations {
   /// No description provided for @createModeDescription.
   ///
   /// In zh, this message translates to:
-  /// **'选择这次要创建的是常规对话，还是侧边字幕模式。'**
+  /// **'请选择要创建的会话类型，可以是对话练习，也可以是字幕参考模式。'**
   String get createModeDescription;
 
   /// No description provided for @sessionPageTitle.
@@ -353,26 +379,56 @@ abstract class AppLocalizations {
   /// No description provided for @buttonConnectShort.
   ///
   /// In zh, this message translates to:
-  /// **'连接并配置'**
+  /// **'连接'**
   String get buttonConnectShort;
 
-  /// No description provided for @labelJapanese.
+  /// No description provided for @labelTranscription.
   ///
   /// In zh, this message translates to:
-  /// **'日语转写'**
-  String get labelJapanese;
+  /// **'转写'**
+  String get labelTranscription;
 
-  /// No description provided for @labelChinese.
+  /// No description provided for @labelTranslation.
   ///
   /// In zh, this message translates to:
-  /// **'中文翻译'**
-  String get labelChinese;
+  /// **'翻译'**
+  String get labelTranslation;
 
   /// No description provided for @labelNextReply.
   ///
   /// In zh, this message translates to:
   /// **'下一句建议'**
   String get labelNextReply;
+
+  /// No description provided for @labelSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'内容总结'**
+  String get labelSummary;
+
+  /// No description provided for @copyNotesEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有可复制的笔记内容。'**
+  String get copyNotesEmpty;
+
+  /// No description provided for @copyNotesSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'笔记已复制到剪切板。'**
+  String get copyNotesSuccess;
+
+  /// No description provided for @tooltipRequestSuggestion.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求建议'**
+  String get tooltipRequestSuggestion;
+
+  /// No description provided for @tooltipCopyNotes.
+  ///
+  /// In zh, this message translates to:
+  /// **'复制笔记'**
+  String get tooltipCopyNotes;
 
   /// No description provided for @labelDebugLogs.
   ///
@@ -389,7 +445,7 @@ abstract class AppLocalizations {
   /// No description provided for @sideCaptionHint.
   ///
   /// In zh, this message translates to:
-  /// **'可通过右上角菜单在系统音频和 Chrome 音频之间切换。'**
+  /// **'你可以在这里查看转写、翻译和内容总结。'**
   String get sideCaptionHint;
 
   /// No description provided for @statusConnected.
@@ -407,13 +463,13 @@ abstract class AppLocalizations {
   /// No description provided for @emptyPlaceholder.
   ///
   /// In zh, this message translates to:
-  /// **'（暂无内容）'**
+  /// **'这里还没有内容。'**
   String get emptyPlaceholder;
 
   /// No description provided for @noLogsYet.
   ///
   /// In zh, this message translates to:
-  /// **'暂无日志'**
+  /// **'还没有日志。'**
   String get noLogsYet;
 }
 
@@ -428,7 +484,7 @@ class _AppLocalizationsDelegate
 
   @override
   bool isSupported(Locale locale) =>
-      <String>['ja', 'zh'].contains(locale.languageCode);
+      <String>['en', 'ja', 'zh'].contains(locale.languageCode);
 
   @override
   bool shouldReload(_AppLocalizationsDelegate old) => false;
@@ -437,6 +493,8 @@ class _AppLocalizationsDelegate
 AppLocalizations lookupAppLocalizations(Locale locale) {
   // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
+    case 'en':
+      return AppLocalizationsEn();
     case 'ja':
       return AppLocalizationsJa();
     case 'zh':

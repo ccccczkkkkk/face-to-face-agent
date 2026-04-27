@@ -12,10 +12,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appTitle => 'Face Agent MVP';
 
   @override
-  String get homeTitle => 'Conversations';
+  String get homeTitle => '会话';
 
   @override
-  String get homeEmpty => '还没有对话，点击右下角开始新建。';
+  String get homeEmpty => '还没有会话，点击右下角按钮新建一个吧。';
 
   @override
   String get sessionEdit => '编辑';
@@ -24,13 +24,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sessionDelete => '删除';
 
   @override
-  String get sessionEditDialogTitle => '编辑对话';
+  String get sessionEditDialogTitle => '编辑会话';
 
   @override
-  String get sessionCreateDialogTitle => '新建对话';
+  String get sessionCreateDialogTitle => '新建会话';
 
   @override
-  String get sessionDeleteDialogTitle => '删除对话';
+  String get sessionDeleteDialogTitle => '删除会话';
 
   @override
   String get sessionModeConversation => '对话模式';
@@ -40,7 +40,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String sessionDeleteConfirm(Object title) {
-    return '确认删除“$title”吗？';
+    return '确定要删除“$title”吗？';
   }
 
   @override
@@ -56,7 +56,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get actionSave => '保存';
 
   @override
-  String get actionConfirm => '确定';
+  String get actionConfirm => '确认';
 
   @override
   String get actionDelete => '删除';
@@ -67,13 +67,25 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get languageAuto => '自动';
+
+  @override
   String get languageSystem => '跟随系统';
 
   @override
   String get languageChinese => '中文';
 
   @override
-  String get languageJapanese => '日本語';
+  String get languageEnglish => '英文';
+
+  @override
+  String get languageJapanese => '日文';
+
+  @override
+  String get languageKorean => '韩文';
+
+  @override
+  String get languageSource => '原文';
 
   @override
   String get settingsTitle => '设置';
@@ -82,19 +94,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createModeConversation => '对话模式';
 
   @override
-  String get createModeConversationHint => '先编辑标题和提纲，再进入会话页面';
+  String get createModeConversationHint => '填写标题和提纲，进入对话练习页面。';
 
   @override
   String get createModeSubtitle => '字幕模式';
 
   @override
-  String get createModeSubtitleHint => '直接进入侧边字幕页面';
+  String get createModeSubtitleHint => '直接进入侧边字幕页面。';
 
   @override
   String get createModeTitle => '选择新建模式';
 
   @override
-  String get createModeDescription => '选择这次要创建的是常规对话，还是侧边字幕模式。';
+  String get createModeDescription => '请选择要创建的会话类型，可以是对话练习，也可以是字幕参考模式。';
 
   @override
   String get sessionPageTitle => 'WS Minimal Test';
@@ -139,16 +151,31 @@ class AppLocalizationsZh extends AppLocalizations {
   String get buttonDisconnect => '断开连接';
 
   @override
-  String get buttonConnectShort => '连接并配置';
+  String get buttonConnectShort => '连接';
 
   @override
-  String get labelJapanese => '日语转写';
+  String get labelTranscription => '转写';
 
   @override
-  String get labelChinese => '中文翻译';
+  String get labelTranslation => '翻译';
 
   @override
   String get labelNextReply => '下一句建议';
+
+  @override
+  String get labelSummary => '内容总结';
+
+  @override
+  String get copyNotesEmpty => '还没有可复制的笔记内容。';
+
+  @override
+  String get copyNotesSuccess => '笔记已复制到剪切板。';
+
+  @override
+  String get tooltipRequestSuggestion => '请求建议';
+
+  @override
+  String get tooltipCopyNotes => '复制笔记';
 
   @override
   String get labelDebugLogs => '调试日志';
@@ -157,7 +184,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get labelSideCaptionMode => '侧边字幕模式';
 
   @override
-  String get sideCaptionHint => '可通过右上角菜单在系统音频和 Chrome 音频之间切换。';
+  String get sideCaptionHint => '你可以在这里查看转写、翻译和内容总结。';
 
   @override
   String statusConnected(Object mode) {
@@ -170,8 +197,8 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get emptyPlaceholder => '（暂无内容）';
+  String get emptyPlaceholder => '这里还没有内容。';
 
   @override
-  String get noLogsYet => '暂无日志';
+  String get noLogsYet => '还没有日志。';
 }

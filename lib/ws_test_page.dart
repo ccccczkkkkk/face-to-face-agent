@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:audio_streamer/audio_streamer.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -21,10 +22,7 @@ import 'windows_session_sidebar.dart';
 class WsTestPage extends StatefulWidget {
   final ConversationSession session;
 
-  const WsTestPage({
-    super.key,
-    required this.session,
-  });
+  const WsTestPage({super.key, required this.session});
 
   @override
   State<WsTestPage> createState() => _WsTestPageState();
@@ -50,34 +48,26 @@ class _WsTestPageState extends State<WsTestPage> {
   static const _accentSoft = Color(0xFFE8E5F3);
   static const _accentText = Color(0xFF67627F);
   static const _shadowColor = Color(0x14111820);
-  static const Map<String, String> _transcriptionLanguageLabels = {
-    'auto': 'Auto',
-    'ja': 'Japanese',
-    'en': 'English',
-    'zh': 'Chinese',
-    'ko': 'Korean',
-  };
-  static const Map<String, String> _translationLanguageLabels = {
-    'zh-Hans': 'Chinese',
-    'ja': 'Japanese',
-    'en': 'English',
-  };
-
   WebSocketChannel? _channel;
 
   final List<String> _logs = [];
   bool _connected = false;
 
-  final TextEditingController _outlineCtl =
-      TextEditingController(text: defaultOutline);
+  final TextEditingController _outlineCtl = TextEditingController(
+    text: defaultOutline,
+  );
 
   final List<String> _jaHistory = [];
   final List<String> _zhHistory = [];
   final List<String> _suggestionHistory = [];
+  final List<SummaryEntry> _summaryHistory = [];
+  final Map<String, int> _segmentIndexById = {};
+  final Map<String, int> _summaryIndexById = {};
 
   String _jaCurrentLine = '';
   String _transcriptionLanguage = 'auto';
   String _translationLanguage = 'zh-Hans';
+  String _summaryLanguage = 'source';
   WindowsRecordingMode _windowsRecordingMode =
       WindowsRecordingMode.systemLoopback;
   Timer? _sessionPersistTimer;
@@ -89,6 +79,13 @@ class _WsTestPageState extends State<WsTestPage> {
     _jaHistory.addAll(widget.session.jaHistory);
     _zhHistory.addAll(widget.session.zhHistory);
     _suggestionHistory.addAll(widget.session.suggestionHistory);
+    _summaryHistory.addAll(widget.session.summaryHistory);
+    for (int i = 0; i < _summaryHistory.length; i++) {
+      final id = _summaryHistory[i].id.trim();
+      if (id.isNotEmpty) {
+        _summaryIndexById[id] = i;
+      }
+    }
 
     if (_isWindowsDesktop) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -106,9 +103,148 @@ class _WsTestPageState extends State<WsTestPage> {
     widget.session.jaHistory = List.of(_jaHistory);
     widget.session.zhHistory = List.of(_zhHistory);
     widget.session.suggestionHistory = List.of(_suggestionHistory);
+    widget.session.summaryHistory = List.of(_summaryHistory);
   }
 
-  void _scheduleSessionPersist({Duration delay = const Duration(milliseconds: 600)}) {
+  int _upsertTranscriptSegment({
+    required String transcript,
+    String? segmentId,
+  }) {
+    final normalizedId = segmentId?.trim();
+    final existingIndex = normalizedId == null || normalizedId.isEmpty
+        ? null
+        : _segmentIndexById[normalizedId];
+
+    if (existingIndex != null &&
+        existingIndex >= 0 &&
+        existingIndex < _jaHistory.length) {
+      _jaHistory[existingIndex] = transcript;
+      while (_zhHistory.length <= existingIndex) {
+        _zhHistory.add('');
+      }
+      return existingIndex;
+    }
+
+    _jaHistory.add(transcript);
+    _zhHistory.add('');
+    final newIndex = _jaHistory.length - 1;
+    if (normalizedId != null && normalizedId.isNotEmpty) {
+      _segmentIndexById[normalizedId] = newIndex;
+    }
+    return newIndex;
+  }
+
+  bool _applyTranslationToSegment(String translation, {String? segmentId}) {
+    final normalizedId = segmentId?.trim();
+    int? targetIndex;
+    if (normalizedId != null && normalizedId.isNotEmpty) {
+      targetIndex = _segmentIndexById[normalizedId];
+    }
+
+    targetIndex ??= _zhHistory.isNotEmpty ? _zhHistory.length - 1 : null;
+    if (targetIndex == null ||
+        targetIndex < 0 ||
+        targetIndex >= _zhHistory.length) {
+      return false;
+    }
+
+    _zhHistory[targetIndex] = translation;
+    return true;
+  }
+
+  List<String> get _summaryItems {
+    return _summaryHistory
+        .map((entry) => entry.textFor(_summaryLanguage))
+        .where((summary) => summary.isNotEmpty)
+        .toList();
+  }
+
+  List<String> get _replyItems {
+    return widget.session.mode == SessionMode.subtitle
+        ? _summaryItems
+        : _suggestionHistory;
+  }
+
+  String get _noteSourceText {
+    return _summaryHistory
+        .map((entry) => entry.noteSource.trim())
+        .where((note) => note.isNotEmpty)
+        .join('\n\n');
+  }
+
+  void _upsertSummary(Map<String, dynamic> obj) {
+    final summaries = <String, String>{};
+    final rawSummaries = obj['summaries'];
+
+    if (rawSummaries is Map) {
+      for (final entry in rawSummaries.entries) {
+        final value = entry.value?.toString().trim() ?? '';
+        if (value.isNotEmpty) {
+          summaries[entry.key.toString()] = value;
+        }
+      }
+    }
+
+    final fallbackSummary = (obj['summary'] ?? '').toString().trim();
+    if (fallbackSummary.isNotEmpty && !summaries.containsKey('source')) {
+      summaries['source'] = fallbackSummary;
+    }
+
+    if (summaries.isEmpty) {
+      return;
+    }
+
+    final summaryId = (obj['summary_id'] ?? '').toString().trim();
+    final summaryType = (obj['summary_type'] ?? 'chunk').toString();
+    final noteSource = (obj['note_source'] ?? '').toString().trim();
+    final existingIndex = summaryId.isEmpty
+        ? null
+        : _summaryIndexById[summaryId];
+
+    if (existingIndex != null &&
+        existingIndex >= 0 &&
+        existingIndex < _summaryHistory.length) {
+      _summaryHistory[existingIndex] = SummaryEntry(
+        id: summaryId,
+        type: summaryType,
+        summaries: summaries,
+        noteSource: noteSource,
+      );
+      return;
+    }
+
+    _summaryHistory.add(
+      SummaryEntry(
+        id: summaryId,
+        type: summaryType,
+        summaries: summaries,
+        noteSource: noteSource,
+      ),
+    );
+    if (summaryId.isNotEmpty) {
+      _summaryIndexById[summaryId] = _summaryHistory.length - 1;
+    }
+  }
+
+  Future<void> _copyNoteSource() async {
+    final l10n = AppLocalizations.of(context)!;
+    final noteText = _noteSourceText;
+    if (noteText.isEmpty) {
+      _showConnectionError(l10n.copyNotesEmpty);
+      return;
+    }
+
+    await Clipboard.setData(ClipboardData(text: noteText));
+    _log('Copied note source to clipboard');
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(l10n.copyNotesSuccess)));
+  }
+
+  void _scheduleSessionPersist({
+    Duration delay = const Duration(milliseconds: 600),
+  }) {
     _syncSession();
     _sessionPersistTimer?.cancel();
     _sessionPersistTimer = Timer(delay, () async {
@@ -138,7 +274,8 @@ class _WsTestPageState extends State<WsTestPage> {
   final double _androidNativeGain = 4.0;
 
   bool get _isWindowsDesktop => !kIsWeb && Platform.isWindows;
-  bool get _supportsFlutterMic => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  bool get _supportsFlutterMic =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
   bool get _supportsNativeMic =>
       !kIsWeb && (Platform.isAndroid || Platform.isWindows);
   bool get _supportsPrimaryCapture => _supportsNativeMic || _supportsFlutterMic;
@@ -183,6 +320,42 @@ class _WsTestPageState extends State<WsTestPage> {
     return 'Native mic';
   }
 
+  String get _replyCardTitle {
+    final l10n = AppLocalizations.of(context)!;
+    return widget.session.mode == SessionMode.subtitle
+        ? l10n.labelSummary
+        : l10n.labelNextReply;
+  }
+
+  Map<String, String> get _transcriptionLanguageLabels {
+    final l10n = AppLocalizations.of(context)!;
+    return {
+      'auto': l10n.languageAuto,
+      'ja': l10n.languageJapanese,
+      'en': l10n.languageEnglish,
+      'zh': l10n.languageChinese,
+      'ko': l10n.languageKorean,
+    };
+  }
+
+  Map<String, String> get _translationLanguageLabels {
+    final l10n = AppLocalizations.of(context)!;
+    return {
+      'zh-Hans': l10n.languageChinese,
+      'ja': l10n.languageJapanese,
+      'en': l10n.languageEnglish,
+    };
+  }
+
+  Map<String, String> get _summaryLanguageLabels {
+    final l10n = AppLocalizations.of(context)!;
+    return {
+      'source': l10n.languageSource,
+      'en': l10n.languageEnglish,
+      'zh-Hans': l10n.languageChinese,
+    };
+  }
+
   IconData get _primaryCaptureIcon {
     return _isPrimaryRecordingOn ? Icons.stop_rounded : Icons.mic_rounded;
   }
@@ -190,6 +363,7 @@ class _WsTestPageState extends State<WsTestPage> {
   void _log(String s) {
     final line = '${DateTime.now().toIso8601String()}  $s';
     debugPrint(line);
+    if (!mounted) return;
     setState(() {
       _logs.add(line);
     });
@@ -235,9 +409,9 @@ class _WsTestPageState extends State<WsTestPage> {
 
   void _showConnectionError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<bool> _connect() async {
@@ -266,30 +440,39 @@ class _WsTestPageState extends State<WsTestPage> {
 
             if (obj is Map<String, dynamic>) {
               final type = (obj['type'] ?? '').toString();
+              if (type == 'error') {
+                unawaited(_handleServerError(obj));
+                return;
+              }
               final decision = _captureAutoScrollDecision();
 
               setState(() {
                 if (type == 'transcript_delta') {
-                  final delta = (obj['delta'] ?? obj['transcript'] ?? '').toString();
+                  final delta = (obj['delta'] ?? obj['transcript'] ?? '')
+                      .toString();
                   if (delta.isNotEmpty) {
                     _jaCurrentLine += delta;
                   }
                 } else if (type == 'transcript_final') {
                   final ja = (obj['transcript'] ?? '').toString();
+                  final segmentId = (obj['segment_id'] ?? '').toString();
                   final finalLine = ja.isNotEmpty ? ja : _jaCurrentLine;
 
                   if (finalLine.isNotEmpty) {
-                    _jaHistory.add(finalLine);
-                    _zhHistory.add('');
+                    _upsertTranscriptSegment(
+                      transcript: finalLine,
+                      segmentId: segmentId,
+                    );
                     _scheduleSessionPersist();
                   }
                   _jaCurrentLine = '';
                   _scheduleSessionPersist();
                 } else if (type == 'suggestion') {
                   final zh = (obj['zh_translation'] ?? '').toString();
+                  final segmentId = (obj['segment_id'] ?? '').toString();
 
-                  if (zh.isNotEmpty && _zhHistory.isNotEmpty) {
-                    _zhHistory[_zhHistory.length - 1] = zh;
+                  if (zh.isNotEmpty &&
+                      _applyTranslationToSegment(zh, segmentId: segmentId)) {
                     _scheduleSessionPersist();
                   }
 
@@ -319,12 +502,16 @@ class _WsTestPageState extends State<WsTestPage> {
                       _scheduleSessionPersist();
                     }
                   }
+                } else if (type == 'summary') {
+                  _upsertSummary(obj);
+                  _scheduleSessionPersist();
                 } else if (type == 'subtitle_translation' ||
                     type == 'translation') {
+                  final segmentId = (obj['segment_id'] ?? '').toString();
                   final zh = (obj['translation'] ?? obj['zh_translation'] ?? '')
                       .toString();
-                  if (zh.isNotEmpty && _zhHistory.isNotEmpty) {
-                    _zhHistory[_zhHistory.length - 1] = zh;
+                  if (zh.isNotEmpty &&
+                      _applyTranslationToSegment(zh, segmentId: segmentId)) {
                     _scheduleSessionPersist();
                   }
                 }
@@ -336,11 +523,15 @@ class _WsTestPageState extends State<WsTestPage> {
         },
         onError: (e) {
           _log('ERROR: $e');
-          setState(() => _connected = false);
+          if (mounted) {
+            setState(() => _connected = false);
+          }
         },
         onDone: () {
           _log('DONE (socket closed)');
-          setState(() => _connected = false);
+          if (mounted) {
+            setState(() => _connected = false);
+          }
         },
       );
 
@@ -348,6 +539,7 @@ class _WsTestPageState extends State<WsTestPage> {
 
       final cfg = {
         'type': 'config',
+        'session_id': widget.session.id,
         'outline': _outlineCtl.text,
         'mode': widget.session.mode.name,
         'transcription_language': _transcriptionLanguage,
@@ -356,15 +548,19 @@ class _WsTestPageState extends State<WsTestPage> {
       ch.sink.add(jsonEncode(cfg));
       _log('SENT config');
 
-      setState(() => _connected = true);
+      if (mounted) {
+        setState(() => _connected = true);
+      }
       _scheduleSessionPersist(delay: Duration.zero);
       return true;
     } catch (e) {
       _channel?.sink.close();
       _channel = null;
       _log('Connect failed: $e');
-      setState(() => _connected = false);
-      _showConnectionError('Server connection failed.');
+      if (mounted) {
+        setState(() => _connected = false);
+      }
+      _showConnectionError(AppLocalizations.of(context)!.statusReady('Server'));
       return false;
     }
   }
@@ -372,7 +568,9 @@ class _WsTestPageState extends State<WsTestPage> {
   void _disconnect() {
     _channel?.sink.close();
     _channel = null;
-    setState(() => _connected = false);
+    if (mounted) {
+      setState(() => _connected = false);
+    }
     _log('Disconnected');
   }
 
@@ -421,9 +619,41 @@ class _WsTestPageState extends State<WsTestPage> {
     }
   }
 
-  Future<void> _selectWindowsRecordingMode(
-    WindowsRecordingMode mode,
-  ) async {
+  void _requestSuggestion() {
+    if (widget.session.mode != SessionMode.conversation) {
+      return;
+    }
+    if (!_connected || _channel == null) {
+      _log('Suggestion request skipped: server is not connected');
+      _showConnectionError(AppLocalizations.of(context)!.statusReady('Server'));
+      return;
+    }
+
+    final payload = jsonEncode({'type': 'request_suggestion'});
+    _channel!.sink.add(payload);
+    _log('SENT request_suggestion');
+  }
+
+  Future<void> _handleServerError(Map<String, dynamic> obj) async {
+    final stage = (obj['stage'] ?? '').toString();
+    final message = (obj['message'] ?? 'Server error').toString();
+    final reason = (obj['reason'] ?? '').toString();
+    final detail = reason.isNotEmpty ? '$message ($reason)' : message;
+
+    _log('Server error [$stage]: $detail');
+    _showConnectionError(detail);
+
+    if (stage == 'stt_connection' && _isPrimaryRecordingOn) {
+      if (_nativeMicOn) {
+        await _stopNativeMic();
+      } else if (_flutterMicOn) {
+        await _stopFlutterMic();
+      }
+      _log('Audio capture paused due to stt_connection error');
+    }
+  }
+
+  Future<void> _selectWindowsRecordingMode(WindowsRecordingMode mode) async {
     if (!_isWindowsDesktop || _windowsRecordingMode == mode) {
       return;
     }
@@ -433,9 +663,7 @@ class _WsTestPageState extends State<WsTestPage> {
     }
 
     await _nativeRecorder.setWindowsCaptureMode(
-      mode == WindowsRecordingMode.systemLoopback
-          ? 'system'
-          : 'chrome_process',
+      mode == WindowsRecordingMode.systemLoopback ? 'system' : 'chrome_process',
     );
 
     setState(() {
@@ -502,7 +730,7 @@ class _WsTestPageState extends State<WsTestPage> {
   Future<String> _savePcmAsWav({
     required Uint8List pcmBytes,
     required String prefix,
-    int sampleRate = 16000,
+    int sampleRate = 24000,
     int channels = 1,
     int bitsPerSample = 16,
   }) async {
@@ -531,10 +759,7 @@ class _WsTestPageState extends State<WsTestPage> {
     }
 
     void writeUint16LE(int value) {
-      header.add([
-        value & 0xff,
-        (value >> 8) & 0xff,
-      ]);
+      header.add([value & 0xff, (value >> 8) & 0xff]);
     }
 
     writeString('RIFF');
@@ -566,8 +791,9 @@ class _WsTestPageState extends State<WsTestPage> {
     int offset = 0;
 
     while (offset < pcm.length) {
-      final end =
-          (offset + chunkSize < pcm.length) ? offset + chunkSize : pcm.length;
+      final end = (offset + chunkSize < pcm.length)
+          ? offset + chunkSize
+          : pcm.length;
       final chunk = pcm.sublist(offset, end);
       _channel!.sink.add(chunk);
       offset = end;
@@ -679,7 +905,8 @@ class _WsTestPageState extends State<WsTestPage> {
       final pcmBytes = _nativePcmBuffer.toBytes();
       final path = await _savePcmAsWav(
         pcmBytes: pcmBytes,
-        prefix: _isWindowsDesktop &&
+        prefix:
+            _isWindowsDesktop &&
                 _windowsRecordingMode == WindowsRecordingMode.processLoopback
             ? 'chrome_audio'
             : (_usesSystemAudio ? 'system_audio' : 'native_mic'),
@@ -771,13 +998,7 @@ class _WsTestPageState extends State<WsTestPage> {
                   currentLine: _jaCurrentLine,
                   controller: _jaScrollController,
                   height: 80,
-                  trailing: _buildLanguageDropdown(
-                    value: _transcriptionLanguage,
-                    labels: _transcriptionLanguageLabels,
-                    onChanged: (value) {
-                      setState(() => _transcriptionLanguage = value);
-                    },
-                  ),
+                  trailing: _buildTranscriptionTrailing(compact: false),
                 ),
                 const SizedBox(height: 10),
                 _historyCard(
@@ -795,10 +1016,19 @@ class _WsTestPageState extends State<WsTestPage> {
                 ),
                 const SizedBox(height: 10),
                 _historyCard(
-                  title: AppLocalizations.of(context)!.labelNextReply,
-                  items: _suggestionHistory,
+                  title: _replyCardTitle,
+                  items: _replyItems,
                   controller: _suggestionScrollController,
                   height: 300,
+                  trailing: widget.session.mode == SessionMode.conversation
+                      ? _buildSuggestionRequestButton(compact: false)
+                      : _buildLanguageDropdown(
+                          value: _summaryLanguage,
+                          labels: _summaryLanguageLabels,
+                          onChanged: (value) {
+                            setState(() => _summaryLanguage = value);
+                          },
+                        ),
                 ),
                 const SizedBox(height: 10),
                 _buildLogsSection(compact: false),
@@ -822,14 +1052,7 @@ class _WsTestPageState extends State<WsTestPage> {
         controller: _jaScrollController,
         height: null,
         compact: true,
-        trailing: _buildLanguageDropdown(
-          value: _transcriptionLanguage,
-          labels: _transcriptionLanguageLabels,
-          compact: true,
-          onChanged: (value) {
-            setState(() => _transcriptionLanguage = value);
-          },
-        ),
+        trailing: _buildTranscriptionTrailing(compact: true),
       ),
       translationCard: _historyCard(
         title: _translationCardTitle,
@@ -847,12 +1070,74 @@ class _WsTestPageState extends State<WsTestPage> {
         ),
       ),
       replyCard: _historyCard(
-        title: AppLocalizations.of(context)!.labelNextReply,
-        items: _suggestionHistory,
+        title: _replyCardTitle,
+        items: _replyItems,
         controller: _suggestionScrollController,
         height: null,
         compact: true,
+        trailing: widget.session.mode == SessionMode.conversation
+            ? _buildSuggestionRequestButton(compact: true)
+            : _buildLanguageDropdown(
+                value: _summaryLanguage,
+                labels: _summaryLanguageLabels,
+                compact: true,
+                onChanged: (value) {
+                  setState(() => _summaryLanguage = value);
+                },
+              ),
       ),
+    );
+  }
+
+  Widget _buildSuggestionRequestButton({required bool compact}) {
+    return IconButton(
+      onPressed: _connected ? _requestSuggestion : null,
+      tooltip: AppLocalizations.of(context)!.tooltipRequestSuggestion,
+      icon: const Icon(Icons.auto_awesome_rounded),
+      color: _accentText,
+      style: IconButton.styleFrom(
+        backgroundColor: _surfaceSoft,
+        disabledBackgroundColor: _surfaceMuted,
+        foregroundColor: _accentText,
+        disabledForegroundColor: const Color(0xFF9FA3B3),
+        minimumSize: Size.square(compact ? 30 : 34),
+        padding: EdgeInsets.all(compact ? 6 : 7),
+      ),
+    );
+  }
+
+  Widget _buildTranscriptionTrailing({required bool compact}) {
+    final dropdown = _buildLanguageDropdown(
+      value: _transcriptionLanguage,
+      labels: _transcriptionLanguageLabels,
+      compact: compact,
+      onChanged: (value) {
+        setState(() => _transcriptionLanguage = value);
+      },
+    );
+
+    if (widget.session.mode != SessionMode.subtitle) {
+      return dropdown;
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dropdown,
+        SizedBox(width: compact ? 4 : 6),
+        IconButton(
+          onPressed: _copyNoteSource,
+          tooltip: AppLocalizations.of(context)!.tooltipCopyNotes,
+          icon: const Icon(Icons.content_copy_rounded),
+          color: _accentText,
+          style: IconButton.styleFrom(
+            backgroundColor: _surfaceSoft,
+            foregroundColor: _accentText,
+            minimumSize: Size.square(compact ? 30 : 34),
+            padding: EdgeInsets.all(compact ? 6 : 7),
+          ),
+        ),
+      ],
     );
   }
 
@@ -989,10 +1274,7 @@ class _WsTestPageState extends State<WsTestPage> {
                     ),
                   ),
                 ),
-                if (trailing != null) ...[
-                  const SizedBox(width: 8),
-                  trailing,
-                ],
+                if (trailing != null) ...[const SizedBox(width: 8), trailing],
               ],
             ),
             SizedBox(height: compact ? 4 : 8),
@@ -1007,16 +1289,19 @@ class _WsTestPageState extends State<WsTestPage> {
   }
 
   String get _transcriptionCardTitle {
-    final base = AppLocalizations.of(context)!.labelJapanese;
+    final base = AppLocalizations.of(context)!.labelTranscription;
     final label =
-        _transcriptionLanguageLabels[_transcriptionLanguage] ?? _transcriptionLanguage;
+        _transcriptionLanguageLabels[_transcriptionLanguage] ??
+        _transcriptionLanguage;
     return '$base · $label';
   }
 
   String get _translationCardTitle {
+    final base = AppLocalizations.of(context)!.labelTranslation;
     final label =
-        _translationLanguageLabels[_translationLanguage] ?? _translationLanguage;
-    return 'Translation · $label';
+        _translationLanguageLabels[_translationLanguage] ??
+        _translationLanguage;
+    return '$base · $label';
   }
 
   Widget _buildLanguageDropdown({

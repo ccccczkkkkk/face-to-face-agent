@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'l10n/app_localizations.dart';
+
 class WindowsSessionSidebar extends StatelessWidget {
   final bool connected;
   final bool isRecording;
@@ -20,6 +22,7 @@ class WindowsSessionSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       color: const Color(0xFFF3F4F7),
       child: Align(
@@ -68,8 +71,8 @@ class WindowsSessionSidebar extends StatelessWidget {
                       Expanded(
                         child: Text(
                           connected
-                              ? 'Connected - $recordingModeLabel'
-                              : 'Ready - $recordingModeLabel',
+                              ? l10n.statusConnected(recordingModeLabel)
+                              : l10n.statusReady(recordingModeLabel),
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -85,20 +88,11 @@ class WindowsSessionSidebar extends StatelessWidget {
                   child: SingleChildScrollView(
                     child: Column(
                       children: [
-                        SizedBox(
-                          height: 150,
-                          child: transcriptCard,
-                        ),
+                        SizedBox(height: 150, child: transcriptCard),
                         const SizedBox(height: 10),
-                        SizedBox(
-                          height: 150,
-                          child: translationCard,
-                        ),
+                        SizedBox(height: 150, child: translationCard),
                         const SizedBox(height: 10),
-                        SizedBox(
-                          height: 375,
-                          child: replyCard,
-                        ),
+                        SizedBox(height: 375, child: replyCard),
                       ],
                     ),
                   ),

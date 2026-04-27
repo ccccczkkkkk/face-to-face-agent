@@ -20,7 +20,7 @@
 
 namespace {
 
-constexpr uint32_t kTargetSampleRate = 16000;
+constexpr uint32_t kTargetSampleRate = 24000;
 constexpr size_t kTargetChunkBytes = 640;
 constexpr DWORD kActivationTimeoutMs = 5000;
 constexpr UINT kAudioChunkMessage = WM_APP + 100;

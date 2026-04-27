@@ -12,7 +12,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get appTitle => 'Face Agent MVP';
 
   @override
-  String get homeTitle => '会話一覧';
+  String get homeTitle => '会話';
 
   @override
   String get homeEmpty => 'まだ会話はありません。右下のボタンから新しく作成できます。';
@@ -27,7 +27,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get sessionEditDialogTitle => '会話を編集';
 
   @override
-  String get sessionCreateDialogTitle => '新しい会話';
+  String get sessionCreateDialogTitle => '会話を作成';
 
   @override
   String get sessionDeleteDialogTitle => '会話を削除';
@@ -47,7 +47,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get fieldTitle => 'タイトル';
 
   @override
-  String get fieldOutline => '概要';
+  String get fieldOutline => 'アウトライン';
 
   @override
   String get actionCancel => 'キャンセル';
@@ -56,7 +56,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get actionSave => '保存';
 
   @override
-  String get actionConfirm => '決定';
+  String get actionConfirm => '確認';
 
   @override
   String get actionDelete => '削除';
@@ -67,13 +67,25 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get languageAuto => '自動';
+
+  @override
   String get languageSystem => 'システムに従う';
 
   @override
-  String get languageChinese => '中文';
+  String get languageChinese => '中国語';
+
+  @override
+  String get languageEnglish => '英語';
 
   @override
   String get languageJapanese => '日本語';
+
+  @override
+  String get languageKorean => '韓国語';
+
+  @override
+  String get languageSource => '原文';
 
   @override
   String get settingsTitle => '設定';
@@ -82,19 +94,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get createModeConversation => '会話モード';
 
   @override
-  String get createModeConversationHint => 'タイトルとアウトラインを編集してから会話ページへ進みます';
+  String get createModeConversationHint => 'タイトルとアウトラインを入力して、会話練習ページに入ります。';
 
   @override
   String get createModeSubtitle => '字幕モード';
 
   @override
-  String get createModeSubtitleHint => 'そのままサイド字幕ページへ進みます';
+  String get createModeSubtitleHint => 'そのままサイド字幕ページに入ります。';
 
   @override
-  String get createModeTitle => '新規モードを選択';
+  String get createModeTitle => '新しいモードを選択';
 
   @override
-  String get createModeDescription => '通常の会話モードにするか、サイド字幕モードにするかを選びます。';
+  String get createModeDescription => '会話練習として使うか、字幕参照モードとして使うかを選んでください。';
 
   @override
   String get sessionPageTitle => 'WS Minimal Test';
@@ -109,46 +121,61 @@ class AppLocalizationsJa extends AppLocalizations {
   String get recordingModeChromeAudio => 'Chrome 音声';
 
   @override
-  String get buttonStartFlutterMic => 'Flutter マイク開始';
+  String get buttonStartFlutterMic => 'Flutter マイクを開始';
 
   @override
-  String get buttonStopFlutterMic => 'Flutter マイク停止';
+  String get buttonStopFlutterMic => 'Flutter マイクを停止';
 
   @override
-  String get buttonStartSystemAudio => 'システム音声開始';
+  String get buttonStartSystemAudio => 'システム音声を開始';
 
   @override
-  String get buttonStopSystemAudio => 'システム音声停止';
+  String get buttonStopSystemAudio => 'システム音声を停止';
 
   @override
-  String get buttonStartChromeAudio => 'Chrome 音声開始';
+  String get buttonStartChromeAudio => 'Chrome 音声を開始';
 
   @override
-  String get buttonStopChromeAudio => 'Chrome 音声停止';
+  String get buttonStopChromeAudio => 'Chrome 音声を停止';
 
   @override
-  String get buttonStartNativeMic => 'ネイティブマイク開始';
+  String get buttonStartNativeMic => 'ネイティブマイクを開始';
 
   @override
-  String get buttonStopNativeMic => 'ネイティブマイク停止';
+  String get buttonStopNativeMic => 'ネイティブマイクを停止';
 
   @override
-  String get buttonConnectConfig => '接続して設定送信';
+  String get buttonConnectConfig => '接続して設定を送信';
 
   @override
   String get buttonDisconnect => '切断';
 
   @override
-  String get buttonConnectShort => '接続して設定';
+  String get buttonConnectShort => '接続';
 
   @override
-  String get labelJapanese => '日本語文字起こし';
+  String get labelTranscription => '文字起こし';
 
   @override
-  String get labelChinese => '中国語翻訳';
+  String get labelTranslation => '翻訳';
 
   @override
   String get labelNextReply => '次の返答候補';
+
+  @override
+  String get labelSummary => '内容まとめ';
+
+  @override
+  String get copyNotesEmpty => 'コピーできるノートはまだありません。';
+
+  @override
+  String get copyNotesSuccess => 'ノートをクリップボードにコピーしました。';
+
+  @override
+  String get tooltipRequestSuggestion => '提案を取得';
+
+  @override
+  String get tooltipCopyNotes => 'ノートをコピー';
 
   @override
   String get labelDebugLogs => 'デバッグログ';
@@ -157,7 +184,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get labelSideCaptionMode => 'サイド字幕モード';
 
   @override
-  String get sideCaptionHint => '右上メニューからシステム音声と Chrome 音声を切り替えできます。';
+  String get sideCaptionHint => 'ここで文字起こし、翻訳、内容まとめを確認できます。';
 
   @override
   String statusConnected(Object mode) {
@@ -170,8 +197,8 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get emptyPlaceholder => '（内容はまだありません）';
+  String get emptyPlaceholder => 'まだ内容はありません。';
 
   @override
-  String get noLogsYet => 'まだログはありません';
+  String get noLogsYet => 'まだログはありません。';
 }

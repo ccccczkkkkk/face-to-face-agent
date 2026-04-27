@@ -1,0 +1,85 @@
+{
+  "@@locale": "en",
+  "appTitle": "Face Agent MVP",
+  "homeTitle": "Sessions",
+  "homeEmpty": "No sessions yet. Create one from the button in the bottom-right corner.",
+  "sessionEdit": "Edit",
+  "sessionDelete": "Delete",
+  "sessionEditDialogTitle": "Edit Session",
+  "sessionCreateDialogTitle": "Create Session",
+  "sessionDeleteDialogTitle": "Delete Session",
+  "sessionModeConversation": "Conversation Mode",
+  "sessionModeSubtitle": "Subtitle Mode",
+  "sessionDeleteConfirm": "Delete \"{title}\"?",
+  "@sessionDeleteConfirm": {
+    "placeholders": {
+      "title": {}
+    }
+  },
+  "fieldTitle": "Title",
+  "fieldOutline": "Outline",
+  "actionCancel": "Cancel",
+  "actionSave": "Save",
+  "actionConfirm": "Confirm",
+  "actionDelete": "Delete",
+  "conversationFallbackTitle": "Conversation {index}",
+  "@conversationFallbackTitle": {
+    "placeholders": {
+      "index": {}
+    }
+  },
+  "languageAuto": "Auto",
+  "languageSystem": "Follow System",
+  "languageChinese": "Chinese",
+  "languageEnglish": "English",
+  "languageJapanese": "Japanese",
+  "languageKorean": "Korean",
+  "languageSource": "Source",
+  "settingsTitle": "Settings",
+  "createModeConversation": "Conversation Mode",
+  "createModeConversationHint": "Fill in a title and outline, then enter the conversation practice page.",
+  "createModeSubtitle": "Subtitle Mode",
+  "createModeSubtitleHint": "Jump directly into the sidebar subtitle page.",
+  "createModeTitle": "Choose Creation Mode",
+  "createModeDescription": "Choose whether to create a conversation practice session or a subtitle reference session.",
+  "sessionPageTitle": "WS Minimal Test",
+  "recordingSettings": "Recording Settings",
+  "recordingModeSystemAudio": "System Audio",
+  "recordingModeChromeAudio": "Chrome Audio",
+  "buttonStartFlutterMic": "Start Flutter Mic",
+  "buttonStopFlutterMic": "Stop Flutter Mic",
+  "buttonStartSystemAudio": "Start System Audio",
+  "buttonStopSystemAudio": "Stop System Audio",
+  "buttonStartChromeAudio": "Start Chrome Audio",
+  "buttonStopChromeAudio": "Stop Chrome Audio",
+  "buttonStartNativeMic": "Start Native Mic",
+  "buttonStopNativeMic": "Stop Native Mic",
+  "buttonConnectConfig": "Connect and Send Config",
+  "buttonDisconnect": "Disconnect",
+  "buttonConnectShort": "Connect",
+  "labelTranscription": "Transcription",
+  "labelTranslation": "Translation",
+  "labelNextReply": "Next Suggestion",
+  "labelSummary": "Summary",
+  "copyNotesEmpty": "No notes are available to copy yet.",
+  "copyNotesSuccess": "Notes copied to clipboard.",
+  "tooltipRequestSuggestion": "Request suggestion",
+  "tooltipCopyNotes": "Copy notes",
+  "labelDebugLogs": "Debug Logs",
+  "labelSideCaptionMode": "Sidebar Subtitle Mode",
+  "sideCaptionHint": "You can review transcription, translation, and summaries here.",
+  "statusConnected": "Connected - {mode}",
+  "@statusConnected": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "statusReady": "Ready - {mode}",
+  "@statusReady": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "emptyPlaceholder": "Nothing here yet.",
+  "noLogsYet": "No logs yet."
+}

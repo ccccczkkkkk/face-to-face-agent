@@ -209,9 +209,7 @@ class _HomePageState extends State<HomePage> {
         Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 1, 1),
         Offset.zero & overlay.size,
       ),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
         PopupMenuItem(
           value: 'edit',
@@ -263,9 +261,7 @@ class _HomePageState extends State<HomePage> {
     final title = (result['title'] ?? '').trim();
     final session = ConversationSession(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      title: title.isEmpty
-          ? _buildTitle(outline, _sessions.length + 1)
-          : title,
+      title: title.isEmpty ? _buildTitle(outline, _sessions.length + 1) : title,
       outline: outline,
       mode: SessionMode.conversation,
     );
@@ -298,9 +294,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _openSession(ConversationSession session) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => WsTestPage(session: session),
-      ),
+      MaterialPageRoute(builder: (_) => WsTestPage(session: session)),
     );
 
     if (!mounted) return;
@@ -407,6 +401,59 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  DateTime _sessionDate(ConversationSession session) {
+    final millis = int.tryParse(session.id);
+    if (millis == null) {
+      return DateTime.now();
+    }
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    return DateTime(dt.year, dt.month, dt.day);
+  }
+
+  String _formatDateHeader(DateTime date) {
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${date.year}.${two(date.month)}.${two(date.day)}';
+  }
+
+  List<_SessionGroup> _buildSessionGroups() {
+    final groups = <_SessionGroup>[];
+    for (final session in _sessions) {
+      final date = _sessionDate(session);
+      if (groups.isEmpty || groups.last.date != date) {
+        groups.add(_SessionGroup(date: date, sessions: [session]));
+      } else {
+        groups.last.sessions.add(session);
+      }
+    }
+    return groups;
+  }
+
+  String _sessionPreview(ConversationSession session) {
+    String collapse(String value) =>
+        value.replaceAll('\n', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    String truncate(String value, {int max = 56}) {
+      if (value.length <= max) return value;
+      return '${value.substring(0, max)}...';
+    }
+
+    if (session.mode == SessionMode.subtitle) {
+      for (final summary in session.summaryHistory) {
+        final text = collapse(summary.textFor('source'));
+        if (text.isNotEmpty) {
+          return truncate(text);
+        }
+      }
+    }
+
+    final outline = collapse(session.outline);
+    if (outline.isNotEmpty) {
+      return truncate(outline);
+    }
+
+    return session.title;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -423,134 +470,165 @@ class _HomePageState extends State<HomePage> {
                 setAppLocale(null);
               } else if (value == 'zh') {
                 setAppLocale(const Locale('zh'));
+              } else if (value == 'en') {
+                setAppLocale(const Locale('en'));
               } else if (value == 'ja') {
                 setAppLocale(const Locale('ja'));
               }
             },
             itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'system',
-                child: Text(l10n.languageSystem),
-              ),
-              PopupMenuItem(
-                value: 'zh',
-                child: Text(l10n.languageChinese),
-              ),
-              PopupMenuItem(
-                value: 'ja',
-                child: Text(l10n.languageJapanese),
-              ),
+              PopupMenuItem(value: 'system', child: Text(l10n.languageSystem)),
+              PopupMenuItem(value: 'zh', child: Text(l10n.languageChinese)),
+              PopupMenuItem(value: 'en', child: Text(l10n.languageEnglish)),
+              PopupMenuItem(value: 'ja', child: Text(l10n.languageJapanese)),
             ],
           ),
         ],
       ),
       body: _sessions.isEmpty
-          ? Center(
-              child: Text(l10n.homeEmpty),
-            )
-          : ListView.builder(
-              itemCount: _sessions.length,
-              itemBuilder: (context, index) {
-                final session = _sessions[index];
-                final tint = _sessionModeTint(session);
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  elevation: 0,
-                  color: tint.withOpacity(0.06),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                    side: BorderSide(
-                      color: tint.withOpacity(0.18),
-                    ),
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(18),
-                    onLongPress: _isWindowsDesktop
-                        ? null
-                        : () async {
-                            await _showSessionActions(session);
-                          },
-                    onSecondaryTapDown: _isWindowsDesktop
-                        ? (details) async {
-                            await _showSessionContextMenu(
-                              session,
-                              details.globalPosition,
-                            );
-                          }
-                        : null,
-                    onTap: () async {
-                      await _openSession(session);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: tint.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Icon(
-                              _sessionModeIcon(session),
-                              color: tint,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: tint.withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    _sessionModeLabel(session),
-                                    style: TextStyle(
-                                      color: tint,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  session.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(
-                            Icons.chevron_right,
-                            color: tint.withOpacity(0.75),
-                          ),
-                        ],
+          ? Center(child: Text(l10n.homeEmpty))
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 90),
+              children: [
+                for (final group in _buildSessionGroups()) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 10, 4, 10),
+                    child: Text(
+                      _formatDateHeader(group.date),
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF7A7D89),
+                        letterSpacing: 0.45,
                       ),
                     ),
                   ),
-                );
-              },
+                  for (final session in group.sessions) ...[
+                    _SessionListCard(
+                      session: session,
+                      tint: _sessionModeTint(session),
+                      icon: _sessionModeIcon(session),
+                      preview: _sessionPreview(session),
+                      onTap: () async {
+                        await _openSession(session);
+                      },
+                      onLongPress: _isWindowsDesktop
+                          ? null
+                          : () async {
+                              await _showSessionActions(session);
+                            },
+                      onSecondaryTapDown: _isWindowsDesktop
+                          ? (details) async {
+                              await _showSessionContextMenu(
+                                session,
+                                details.globalPosition,
+                              );
+                            }
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                ],
+              ],
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateModePicker,
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+class _SessionGroup {
+  final DateTime date;
+  final List<ConversationSession> sessions;
+
+  _SessionGroup({required this.date, required this.sessions});
+}
+
+class _SessionListCard extends StatelessWidget {
+  final ConversationSession session;
+  final Color tint;
+  final IconData icon;
+  final String preview;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final GestureTapDownCallback? onSecondaryTapDown;
+
+  const _SessionListCard({
+    required this.session,
+    required this.tint,
+    required this.icon,
+    required this.preview,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onSecondaryTapDown,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: tint.withOpacity(0.06),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        onSecondaryTapDown: onSecondaryTapDown,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: tint.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: tint),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF232632),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      preview,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.25,
+                        color: Color(0xFF6A6C78),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Padding(
+                padding: const EdgeInsets.only(top: 18),
+                child: Icon(
+                  Icons.arrow_forward_rounded,
+                  color: tint.withOpacity(0.78),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -615,10 +693,7 @@ class _CreateModeCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(
-                Icons.arrow_forward_rounded,
-                color: tint.withOpacity(0.8),
-              ),
+              Icon(Icons.arrow_forward_rounded, color: tint.withOpacity(0.8)),
             ],
           ),
         ),
