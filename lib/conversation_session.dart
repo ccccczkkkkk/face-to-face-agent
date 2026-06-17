@@ -1,17 +1,101 @@
 enum SessionMode { conversation, subtitle }
 
+class ImportantEventItem {
+  String id;
+  String kind;
+  String priority;
+  String urgency;
+  Map<String, String> texts;
+
+  ImportantEventItem({
+    required this.id,
+    required this.kind,
+    required this.priority,
+    required this.urgency,
+    required Map<String, String> texts,
+  }) : texts = Map.of(texts);
+
+  factory ImportantEventItem.fromJson(Map<String, dynamic> json) {
+    final texts = <String, String>{};
+    for (final key in const ['source', 'en', 'zh-Hans', 'zh', 'ja']) {
+      final value = json[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) {
+        texts[key] = value;
+      }
+    }
+
+    return ImportantEventItem(
+      id: (json['item_id'] ?? json['id'] ?? '').toString(),
+      kind: (json['kind'] ?? '').toString(),
+      priority: (json['priority'] ?? '').toString(),
+      urgency: (json['urgency'] ?? '').toString(),
+      texts: texts,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'item_id': id,
+      'kind': kind,
+      'priority': priority,
+      'urgency': urgency,
+      ...texts,
+    };
+  }
+
+  String textFor(String language) {
+    final direct = texts[language];
+    if (direct != null && direct.isNotEmpty) {
+      return direct;
+    }
+
+    if (language == 'zh-Hans') {
+      final zh = texts['zh'];
+      if (zh != null && zh.isNotEmpty) {
+        return zh;
+      }
+    }
+
+    for (final key in const ['source', 'en', 'zh-Hans', 'zh', 'ja']) {
+      final value = texts[key];
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    for (final value in texts.values) {
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    return '';
+  }
+
+  String get metaLine {
+    return [
+      if (kind.trim().isNotEmpty) kind.trim(),
+      if (priority.trim().isNotEmpty) priority.trim(),
+      if (urgency.trim().isNotEmpty) urgency.trim(),
+    ].join(' / ');
+  }
+}
+
 class SummaryEntry {
   String id;
   String type;
   Map<String, String> summaries;
   String noteSource;
+  List<ImportantEventItem> items;
 
   SummaryEntry({
     required this.id,
     required this.type,
     required Map<String, String> summaries,
     this.noteSource = '',
-  }) : summaries = Map.of(summaries);
+    List<ImportantEventItem>? items,
+  }) : summaries = Map.of(summaries),
+       items = items ?? [];
 
   factory SummaryEntry.fromJson(Map<String, dynamic> json) {
     final rawSummaries = json['summaries'];
@@ -31,11 +115,20 @@ class SummaryEntry {
       summaries['source'] = fallbackSummary;
     }
 
+    final rawItems = json['items'];
+    final items = rawItems is List
+        ? rawItems
+              .whereType<Map<String, dynamic>>()
+              .map(ImportantEventItem.fromJson)
+              .toList()
+        : <ImportantEventItem>[];
+
     return SummaryEntry(
       id: (json['summary_id'] ?? json['id'] ?? '').toString(),
       type: (json['summary_type'] ?? json['type'] ?? 'chunk').toString(),
       summaries: summaries,
       noteSource: (json['note_source'] ?? '').toString(),
+      items: items,
     );
   }
 
@@ -45,6 +138,7 @@ class SummaryEntry {
       'summary_type': type,
       'summaries': summaries,
       'note_source': noteSource,
+      'items': items.map((entry) => entry.toJson()).toList(),
     };
   }
 
@@ -88,6 +182,12 @@ class ConversationSession {
   List<String> zhHistory;
   List<String> suggestionHistory;
   List<SummaryEntry> summaryHistory;
+  String transcriptionLanguage;
+  String translationLanguage;
+  String summaryLanguage;
+  String importantEventLanguage;
+  String windowsRecordingMode;
+  String androidSubtitleAudioMode;
 
   ConversationSession({
     required this.id,
@@ -98,6 +198,12 @@ class ConversationSession {
     List<String>? zhHistory,
     List<String>? suggestionHistory,
     List<SummaryEntry>? summaryHistory,
+    this.transcriptionLanguage = 'auto',
+    this.translationLanguage = 'zh-Hans',
+    this.summaryLanguage = 'source',
+    this.importantEventLanguage = 'source',
+    this.windowsRecordingMode = '',
+    this.androidSubtitleAudioMode = '',
   }) : jaHistory = jaHistory ?? [],
        zhHistory = zhHistory ?? [],
        suggestionHistory = suggestionHistory ?? [],
@@ -121,6 +227,16 @@ class ConversationSession {
       suggestionHistory: (json['suggestionHistory'] as List<dynamic>? ?? [])
           .map((e) => e.toString())
           .toList(),
+      transcriptionLanguage: (json['transcriptionLanguage'] ?? 'auto')
+          .toString(),
+      translationLanguage: (json['translationLanguage'] ?? 'zh-Hans')
+          .toString(),
+      summaryLanguage: (json['summaryLanguage'] ?? 'source').toString(),
+      importantEventLanguage: (json['importantEventLanguage'] ?? 'source')
+          .toString(),
+      windowsRecordingMode: (json['windowsRecordingMode'] ?? '').toString(),
+      androidSubtitleAudioMode: (json['androidSubtitleAudioMode'] ?? '')
+          .toString(),
       summaryHistory: () {
         final structured = (json['summaryHistory'] as List<dynamic>? ?? [])
             .whereType<Map<String, dynamic>>()
@@ -159,6 +275,12 @@ class ConversationSession {
       'jaHistory': jaHistory,
       'zhHistory': zhHistory,
       'suggestionHistory': suggestionHistory,
+      'transcriptionLanguage': transcriptionLanguage,
+      'translationLanguage': translationLanguage,
+      'summaryLanguage': summaryLanguage,
+      'importantEventLanguage': importantEventLanguage,
+      'windowsRecordingMode': windowsRecordingMode,
+      'androidSubtitleAudioMode': androidSubtitleAudioMode,
       'summaryHistory': summaryHistory.map((entry) => entry.toJson()).toList(),
     };
   }

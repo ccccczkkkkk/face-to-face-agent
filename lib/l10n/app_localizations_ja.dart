@@ -115,6 +115,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get recordingSettings => '録音設定';
 
   @override
+  String get recordingModeMicrophone => 'マイク';
+
+  @override
   String get recordingModeSystemAudio => 'システム音声';
 
   @override
@@ -201,4 +204,23 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get noLogsYet => 'まだログはありません。';
+
+  @override
+  String get labelImportantEvents => '重要な出来事';
+
+  @override
+  String get tooltipSubtitleContent => '字幕内容';
+
+  @override
+  String get tooltipImportantEvents => '重要な出来事';
+
+  @override
+  String get microphonePermissionRequired => '録音を開始するにはマイク権限が必要です。';
+
+  @override
+  String get microphonePermissionOpenSettings => '設定を開く';
+
+  @override
+  String get androidSystemAudioUnavailable =>
+      'Android のシステム音声取得はまだ利用できません。今はマイクモードを使用してください。';
 }

@@ -190,7 +190,8 @@ void WasapiLoopbackCapture::CaptureLoop() {
     is_recording_ = false;
   };
 
-  if (capture_mode_ == CaptureMode::kSystemLoopback) {
+  if (capture_mode_ == CaptureMode::kMicrophone ||
+      capture_mode_ == CaptureMode::kSystemLoopback) {
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                           IID_PPV_ARGS(&device_enumerator));
     if (FAILED(hr)) {
@@ -198,7 +199,9 @@ void WasapiLoopbackCapture::CaptureLoop() {
       return;
     }
 
-    hr = device_enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+    hr = device_enumerator->GetDefaultAudioEndpoint(
+        capture_mode_ == CaptureMode::kMicrophone ? eCapture : eRender,
+        eConsole, &device);
     if (FAILED(hr)) {
       cleanup();
       return;
@@ -518,7 +521,8 @@ NativeAudioPlugin::NativeAudioPlugin(flutter::FlutterEngine* engine) {
 }
 
 NativeAudioPlugin::~NativeAudioPlugin() {
-  capture_.Stop();
+  user_capture_.Stop();
+  peer_capture_.Stop();
   DestroyMessageWindow();
 }
 
@@ -534,14 +538,42 @@ void NativeAudioPlugin::HandleMethodCall(
       return;
     }
 
-    capture_mode_ = (*mode_value == "chrome_process")
-                        ? WasapiLoopbackCapture::CaptureMode::kProcessLoopback
-                        : WasapiLoopbackCapture::CaptureMode::kSystemLoopback;
+    if (*mode_value == "microphone") {
+      capture_mode_ = WasapiLoopbackCapture::CaptureMode::kMicrophone;
+    } else if (*mode_value == "chrome_process") {
+      capture_mode_ = WasapiLoopbackCapture::CaptureMode::kProcessLoopback;
+    } else {
+      capture_mode_ = WasapiLoopbackCapture::CaptureMode::kSystemLoopback;
+    }
     result->Success(flutter::EncodableValue(true));
     return;
   }
 
-  if (call.method_name() == "startRecording") {
+  if (call.method_name() == "startUserMicrophone") {
+    std::string error_message;
+    const bool started = user_capture_.Start(
+        [this](const std::vector<uint8_t>& bytes) {
+          SendAudioChunk("user_mic", bytes);
+        },
+        WasapiLoopbackCapture::CaptureMode::kMicrophone, 0, &error_message);
+    if (started) {
+      result->Success(flutter::EncodableValue(true));
+    } else {
+      result->Error("START_FAILED",
+                    error_message.empty() ? "Failed to start microphone capture"
+                                          : error_message);
+    }
+    return;
+  }
+
+  if (call.method_name() == "stopUserMicrophone") {
+    user_capture_.Stop();
+    result->Success(flutter::EncodableValue(true));
+    return;
+  }
+
+  if (call.method_name() == "startPeerCapture" ||
+      call.method_name() == "startRecording") {
     std::string error_message;
     DWORD target_process_id = 0;
     if (capture_mode_ == WasapiLoopbackCapture::CaptureMode::kProcessLoopback) {
@@ -559,8 +591,10 @@ void NativeAudioPlugin::HandleMethodCall(
       }
     }
 
-    const bool started = capture_.Start(
-        [this](const std::vector<uint8_t>& bytes) { SendAudioChunk(bytes); },
+    const bool started = peer_capture_.Start(
+        [this](const std::vector<uint8_t>& bytes) {
+          SendAudioChunk("peer_audio", bytes);
+        },
         capture_mode_, target_process_id,
         &error_message);
     if (started) {
@@ -571,14 +605,18 @@ void NativeAudioPlugin::HandleMethodCall(
                         ? (capture_mode_ ==
                                    WasapiLoopbackCapture::CaptureMode::kProcessLoopback
                                ? "Failed to start Chrome audio capture"
-                               : "Failed to start system audio capture")
+                               : (capture_mode_ ==
+                                          WasapiLoopbackCapture::CaptureMode::kMicrophone
+                                      ? "Failed to start microphone capture"
+                                      : "Failed to start system audio capture"))
                                           : error_message);
     }
     return;
   }
 
-  if (call.method_name() == "stopRecording") {
-    capture_.Stop();
+  if (call.method_name() == "stopPeerCapture" ||
+      call.method_name() == "stopRecording") {
+    peer_capture_.Stop();
     result->Success(flutter::EncodableValue(true));
     return;
   }
@@ -586,7 +624,8 @@ void NativeAudioPlugin::HandleMethodCall(
   result->NotImplemented();
 }
 
-void NativeAudioPlugin::SendAudioChunk(const std::vector<uint8_t>& bytes) {
+void NativeAudioPlugin::SendAudioChunk(const std::string& source,
+                                       const std::vector<uint8_t>& bytes) {
   {
     std::lock_guard<std::mutex> lock(event_sink_mutex_);
     if (!event_sink_) {
@@ -596,7 +635,7 @@ void NativeAudioPlugin::SendAudioChunk(const std::vector<uint8_t>& bytes) {
 
   {
     std::lock_guard<std::mutex> lock(pending_audio_mutex_);
-    pending_audio_chunks_.push(bytes);
+    pending_audio_chunks_.push(PendingAudioChunk{source, bytes});
   }
 
   if (message_window_ != nullptr) {
@@ -605,7 +644,7 @@ void NativeAudioPlugin::SendAudioChunk(const std::vector<uint8_t>& bytes) {
 }
 
 void NativeAudioPlugin::DispatchPendingAudioChunks() {
-  std::queue<std::vector<uint8_t>> chunks;
+  std::queue<PendingAudioChunk> chunks;
   {
     std::lock_guard<std::mutex> lock(pending_audio_mutex_);
     std::swap(chunks, pending_audio_chunks_);
@@ -617,7 +656,13 @@ void NativeAudioPlugin::DispatchPendingAudioChunks() {
   }
 
   while (!chunks.empty()) {
-    event_sink_->Success(flutter::EncodableValue(chunks.front()));
+    flutter::EncodableMap event = {
+        {flutter::EncodableValue("source"),
+         flutter::EncodableValue(chunks.front().source)},
+        {flutter::EncodableValue("pcm"),
+         flutter::EncodableValue(chunks.front().bytes)},
+    };
+    event_sink_->Success(flutter::EncodableValue(event));
     chunks.pop();
   }
 }

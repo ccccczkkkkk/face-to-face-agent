@@ -44,6 +44,7 @@
   "createModeDescription": "Choose whether to create a conversation practice session or a subtitle reference session.",
   "sessionPageTitle": "WS Minimal Test",
   "recordingSettings": "Recording Settings",
+  "recordingModeMicrophone": "Microphone",
   "recordingModeSystemAudio": "System Audio",
   "recordingModeChromeAudio": "Chrome Audio",
   "buttonStartFlutterMic": "Start Flutter Mic",
@@ -81,5 +82,11 @@
     }
   },
   "emptyPlaceholder": "Nothing here yet.",
-  "noLogsYet": "No logs yet."
+  "noLogsYet": "No logs yet.",
+  "labelImportantEvents": "Important Events",
+  "tooltipSubtitleContent": "Subtitle content",
+  "tooltipImportantEvents": "Important events",
+  "microphonePermissionRequired": "Microphone permission is required to start recording.",
+  "microphonePermissionOpenSettings": "Open Settings",
+  "androidSystemAudioUnavailable": "Android system audio capture is not available yet. Please use microphone mode for now."
 }

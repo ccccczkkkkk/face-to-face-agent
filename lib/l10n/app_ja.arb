@@ -44,6 +44,7 @@
   "createModeDescription": "会話練習として使うか、字幕参照モードとして使うかを選んでください。",
   "sessionPageTitle": "WS Minimal Test",
   "recordingSettings": "録音設定",
+  "recordingModeMicrophone": "マイク",
   "recordingModeSystemAudio": "システム音声",
   "recordingModeChromeAudio": "Chrome 音声",
   "buttonStartFlutterMic": "Flutter マイクを開始",
@@ -81,5 +82,11 @@
     }
   },
   "emptyPlaceholder": "まだ内容はありません。",
-  "noLogsYet": "まだログはありません。"
+  "noLogsYet": "まだログはありません。",
+  "labelImportantEvents": "重要な出来事",
+  "tooltipSubtitleContent": "字幕内容",
+  "tooltipImportantEvents": "重要な出来事",
+  "microphonePermissionRequired": "録音を開始するにはマイク権限が必要です。",
+  "microphonePermissionOpenSettings": "設定を開く",
+  "androidSystemAudioUnavailable": "Android のシステム音声取得はまだ利用できません。今はマイクモードを使用してください。"
 }

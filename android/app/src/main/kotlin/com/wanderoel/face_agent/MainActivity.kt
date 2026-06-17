@@ -32,7 +32,7 @@ class MainActivity : FlutterActivity() {
     private var ns: NoiseSuppressor? = null
     private var agc: AutomaticGainControl? = null
 
-    private val sampleRate = 16000
+    private val sampleRate = 24000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
 

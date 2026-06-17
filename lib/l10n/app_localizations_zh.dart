@@ -115,6 +115,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recordingSettings => '录音设置';
 
   @override
+  String get recordingModeMicrophone => '麦克风';
+
+  @override
   String get recordingModeSystemAudio => '系统音频';
 
   @override
@@ -201,4 +204,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get noLogsYet => '还没有日志。';
+
+  @override
+  String get labelImportantEvents => '重要事件';
+
+  @override
+  String get tooltipSubtitleContent => '字幕内容';
+
+  @override
+  String get tooltipImportantEvents => '重要事件';
+
+  @override
+  String get microphonePermissionRequired => '需要麦克风权限才能开始录音。';
+
+  @override
+  String get microphonePermissionOpenSettings => '打开设置';
+
+  @override
+  String get androidSystemAudioUnavailable => 'Android 系统音频采集暂不可用，请先使用麦克风模式。';
 }

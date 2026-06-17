@@ -119,6 +119,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get recordingSettings => 'Recording Settings';
 
   @override
+  String get recordingModeMicrophone => 'Microphone';
+
+  @override
   String get recordingModeSystemAudio => 'System Audio';
 
   @override
@@ -206,4 +209,24 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noLogsYet => 'No logs yet.';
+
+  @override
+  String get labelImportantEvents => 'Important Events';
+
+  @override
+  String get tooltipSubtitleContent => 'Subtitle content';
+
+  @override
+  String get tooltipImportantEvents => 'Important events';
+
+  @override
+  String get microphonePermissionRequired =>
+      'Microphone permission is required to start recording.';
+
+  @override
+  String get microphonePermissionOpenSettings => 'Open Settings';
+
+  @override
+  String get androidSystemAudioUnavailable =>
+      'Android system audio capture is not available yet. Please use microphone mode for now.';
 }

@@ -21,6 +21,7 @@ class WasapiLoopbackCapture {
  public:
   using AudioCallback = std::function<void(const std::vector<uint8_t>&)>;
   enum class CaptureMode {
+    kMicrophone,
     kSystemLoopback,
     kProcessLoopback,
   };
@@ -70,10 +71,16 @@ class NativeAudioPlugin {
   NativeAudioPlugin& operator=(const NativeAudioPlugin&) = delete;
 
  private:
+  struct PendingAudioChunk {
+    std::string source;
+    std::vector<uint8_t> bytes;
+  };
+
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
-  void SendAudioChunk(const std::vector<uint8_t>& bytes);
+  void SendAudioChunk(const std::string& source,
+                      const std::vector<uint8_t>& bytes);
   void DispatchPendingAudioChunks();
   bool CreateMessageWindow();
   void DestroyMessageWindow();
@@ -86,14 +93,15 @@ class NativeAudioPlugin {
       const std::wstring& executable_name) const;
   DWORD FindRootProcessIdByExecutableName(const std::wstring& executable_name) const;
 
-  WasapiLoopbackCapture capture_;
+  WasapiLoopbackCapture user_capture_;
+  WasapiLoopbackCapture peer_capture_;
   WasapiLoopbackCapture::CaptureMode capture_mode_ =
       WasapiLoopbackCapture::CaptureMode::kSystemLoopback;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> control_channel_;
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>> pcm_channel_;
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
   std::mutex event_sink_mutex_;
-  std::queue<std::vector<uint8_t>> pending_audio_chunks_;
+  std::queue<PendingAudioChunk> pending_audio_chunks_;
   std::mutex pending_audio_mutex_;
   HWND message_window_ = nullptr;
 };

@@ -304,6 +304,12 @@ abstract class AppLocalizations {
   /// **'录音设置'**
   String get recordingSettings;
 
+  /// No description provided for @recordingModeMicrophone.
+  ///
+  /// In zh, this message translates to:
+  /// **'麦克风'**
+  String get recordingModeMicrophone;
+
   /// No description provided for @recordingModeSystemAudio.
   ///
   /// In zh, this message translates to:
@@ -471,6 +477,42 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'还没有日志。'**
   String get noLogsYet;
+
+  /// No description provided for @labelImportantEvents.
+  ///
+  /// In zh, this message translates to:
+  /// **'重要事件'**
+  String get labelImportantEvents;
+
+  /// No description provided for @tooltipSubtitleContent.
+  ///
+  /// In zh, this message translates to:
+  /// **'字幕内容'**
+  String get tooltipSubtitleContent;
+
+  /// No description provided for @tooltipImportantEvents.
+  ///
+  /// In zh, this message translates to:
+  /// **'重要事件'**
+  String get tooltipImportantEvents;
+
+  /// No description provided for @microphonePermissionRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要麦克风权限才能开始录音。'**
+  String get microphonePermissionRequired;
+
+  /// No description provided for @microphonePermissionOpenSettings.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开设置'**
+  String get microphonePermissionOpenSettings;
+
+  /// No description provided for @androidSystemAudioUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'Android 系统音频采集暂不可用，请先使用麦克风模式。'**
+  String get androidSystemAudioUnavailable;
 }
 
 class _AppLocalizationsDelegate

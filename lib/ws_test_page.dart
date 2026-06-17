@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -40,9 +40,10 @@ class _AutoScrollDecision {
   });
 }
 
+enum AndroidSubtitleAudioMode { microphone, systemAudioUnavailable }
+
 class _WsTestPageState extends State<WsTestPage> {
   static const _pageBg = Color(0xFFF3F4F7);
-  static const _surface = Colors.white;
   static const _surfaceSoft = Color(0xFFF8F8FB);
   static const _surfaceMuted = Color(0xFFF0F1F6);
   static const _accentSoft = Color(0xFFE8E5F3);
@@ -52,6 +53,9 @@ class _WsTestPageState extends State<WsTestPage> {
 
   final List<String> _logs = [];
   bool _connected = false;
+  bool _socketWritable = false;
+  bool _loggedFirstAudioChunk = false;
+  bool _loggedFirstRawPcmChunk = false;
 
   final TextEditingController _outlineCtl = TextEditingController(
     text: defaultOutline,
@@ -68,13 +72,85 @@ class _WsTestPageState extends State<WsTestPage> {
   String _transcriptionLanguage = 'auto';
   String _translationLanguage = 'zh-Hans';
   String _summaryLanguage = 'source';
+  String _importantEventLanguage = 'source';
+  AndroidSubtitleAudioMode _androidSubtitleAudioMode =
+      AndroidSubtitleAudioMode.microphone;
   WindowsRecordingMode _windowsRecordingMode =
       WindowsRecordingMode.systemLoopback;
   Timer? _sessionPersistTimer;
+  bool _windowsUserMicOn = false;
+  bool _windowsPeerCaptureOn = false;
+  bool _windowsUserMicMuted = false;
+  int _windowsSidebarPageIndex = 0;
+  int _mobileSubtitlePageIndex = 0;
+
+  WindowsRecordingMode? _windowsRecordingModeFromSession(String value) {
+    return switch (value) {
+      'systemLoopback' => WindowsRecordingMode.systemLoopback,
+      'microphone' => WindowsRecordingMode.microphone,
+      'systemLoopbackWithMic' => WindowsRecordingMode.systemLoopbackWithMic,
+      'processLoopback' => WindowsRecordingMode.processLoopback,
+      _ => null,
+    };
+  }
+
+  AndroidSubtitleAudioMode? _androidSubtitleAudioModeFromSession(String value) {
+    return switch (value) {
+      'microphone' => AndroidSubtitleAudioMode.microphone,
+      'systemAudioUnavailable' =>
+        AndroidSubtitleAudioMode.systemAudioUnavailable,
+      _ => null,
+    };
+  }
+
+  String _windowsCaptureModeValue(WindowsRecordingMode mode) {
+    return switch (mode) {
+      WindowsRecordingMode.microphone => 'microphone',
+      WindowsRecordingMode.processLoopback => 'chrome_process',
+      _ => 'system',
+    };
+  }
+
+  WindowsRecordingMode _defaultWindowsRecordingMode() {
+    return widget.session.mode == SessionMode.conversation
+        ? WindowsRecordingMode.systemLoopbackWithMic
+        : WindowsRecordingMode.systemLoopback;
+  }
+
+  WindowsRecordingMode _validWindowsRecordingModeForSession(
+    WindowsRecordingMode? mode,
+  ) {
+    if (widget.session.mode == SessionMode.conversation) {
+      if (mode == WindowsRecordingMode.systemLoopback ||
+          mode == WindowsRecordingMode.systemLoopbackWithMic) {
+        return mode!;
+      }
+      return _defaultWindowsRecordingMode();
+    }
+
+    if (mode == WindowsRecordingMode.systemLoopback ||
+        mode == WindowsRecordingMode.microphone) {
+      return mode!;
+    }
+
+    return _defaultWindowsRecordingMode();
+  }
 
   @override
   void initState() {
     super.initState();
+    _windowsRecordingMode = _validWindowsRecordingModeForSession(
+      _windowsRecordingModeFromSession(widget.session.windowsRecordingMode),
+    );
+    _androidSubtitleAudioMode =
+        _androidSubtitleAudioModeFromSession(
+          widget.session.androidSubtitleAudioMode,
+        ) ??
+        AndroidSubtitleAudioMode.microphone;
+    _transcriptionLanguage = widget.session.transcriptionLanguage;
+    _translationLanguage = widget.session.translationLanguage;
+    _summaryLanguage = widget.session.summaryLanguage;
+    _importantEventLanguage = widget.session.importantEventLanguage;
     _outlineCtl.text = widget.session.outline;
     _jaHistory.addAll(widget.session.jaHistory);
     _zhHistory.addAll(widget.session.zhHistory);
@@ -86,11 +162,22 @@ class _WsTestPageState extends State<WsTestPage> {
         _summaryIndexById[id] = i;
       }
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollAllHistoryToBottom(jump: true);
+    });
 
     if (_isWindowsDesktop) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
-          await _nativeRecorder.setWindowsCaptureMode('system');
+          final mode = _windowsRecordingMode;
+          await _nativeRecorder.setWindowsCaptureMode(
+            _windowsCaptureModeValue(mode),
+          );
+          if (mounted) {
+            setState(() {
+              _windowsRecordingMode = mode;
+            });
+          }
         } catch (e) {
           _log('Initialize Windows capture mode failed: $e');
         }
@@ -104,6 +191,12 @@ class _WsTestPageState extends State<WsTestPage> {
     widget.session.zhHistory = List.of(_zhHistory);
     widget.session.suggestionHistory = List.of(_suggestionHistory);
     widget.session.summaryHistory = List.of(_summaryHistory);
+    widget.session.transcriptionLanguage = _transcriptionLanguage;
+    widget.session.translationLanguage = _translationLanguage;
+    widget.session.summaryLanguage = _summaryLanguage;
+    widget.session.importantEventLanguage = _importantEventLanguage;
+    widget.session.windowsRecordingMode = _windowsRecordingMode.name;
+    widget.session.androidSubtitleAudioMode = _androidSubtitleAudioMode.name;
   }
 
   int _upsertTranscriptSegment({
@@ -165,11 +258,22 @@ class _WsTestPageState extends State<WsTestPage> {
         : _suggestionHistory;
   }
 
-  String get _noteSourceText {
-    return _summaryHistory
-        .map((entry) => entry.noteSource.trim())
-        .where((note) => note.isNotEmpty)
-        .join('\n\n');
+  List<ImportantEventItem> get _importantEventItems {
+    return _summaryHistory.expand((entry) => entry.items).toList();
+  }
+
+  List<String> get _importantEventCopyItems {
+    return _importantEventItems
+        .map((item) {
+          final text = item.textFor(_importantEventLanguage).trim();
+          if (text.isEmpty) {
+            return '';
+          }
+          final meta = item.metaLine;
+          return meta.isEmpty ? text : '$meta\n$text';
+        })
+        .where((item) => item.isNotEmpty)
+        .toList();
   }
 
   void _upsertSummary(Map<String, dynamic> obj) {
@@ -190,7 +294,14 @@ class _WsTestPageState extends State<WsTestPage> {
       summaries['source'] = fallbackSummary;
     }
 
-    if (summaries.isEmpty) {
+    final rawItems = obj['items'];
+    final items = rawItems is List
+        ? rawItems
+              .whereType<Map<String, dynamic>>()
+              .map(ImportantEventItem.fromJson)
+              .toList()
+        : <ImportantEventItem>[];
+    if (summaries.isEmpty && items.isEmpty) {
       return;
     }
 
@@ -209,6 +320,7 @@ class _WsTestPageState extends State<WsTestPage> {
         type: summaryType,
         summaries: summaries,
         noteSource: noteSource,
+        items: items,
       );
       return;
     }
@@ -219,6 +331,7 @@ class _WsTestPageState extends State<WsTestPage> {
         type: summaryType,
         summaries: summaries,
         noteSource: noteSource,
+        items: items,
       ),
     );
     if (summaryId.isNotEmpty) {
@@ -226,16 +339,20 @@ class _WsTestPageState extends State<WsTestPage> {
     }
   }
 
-  Future<void> _copyNoteSource() async {
+  Future<void> _copyCardItems(List<String> items, String logLabel) async {
     final l10n = AppLocalizations.of(context)!;
-    final noteText = _noteSourceText;
-    if (noteText.isEmpty) {
+    final text = items
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .join('\n');
+
+    if (text.isEmpty) {
       _showConnectionError(l10n.copyNotesEmpty);
       return;
     }
 
-    await Clipboard.setData(ClipboardData(text: noteText));
-    _log('Copied note source to clipboard');
+    await Clipboard.setData(ClipboardData(text: text));
+    _log('Copied $logLabel to clipboard');
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
@@ -279,16 +396,38 @@ class _WsTestPageState extends State<WsTestPage> {
   bool get _supportsNativeMic =>
       !kIsWeb && (Platform.isAndroid || Platform.isWindows);
   bool get _supportsPrimaryCapture => _supportsNativeMic || _supportsFlutterMic;
-  bool get _isPrimaryRecordingOn => _nativeMicOn || _flutterMicOn;
+  bool get _isWindowsConversationMode =>
+      _isWindowsDesktop && widget.session.mode == SessionMode.conversation;
+  bool get _isWindowsSubtitleMode =>
+      _isWindowsDesktop && widget.session.mode == SessionMode.subtitle;
+  bool get _isAndroidSubtitleMode =>
+      !kIsWeb &&
+      Platform.isAndroid &&
+      widget.session.mode == SessionMode.subtitle;
+  bool get _needsAndroidMicrophonePermission =>
+      !kIsWeb && Platform.isAndroid && _supportsNativeMic;
+  bool get _isPrimaryRecordingOn =>
+      _nativeMicOn ||
+      _flutterMicOn ||
+      _windowsUserMicOn ||
+      _windowsPeerCaptureOn;
   bool get _usesSystemAudio =>
       !_isWindowsDesktop ||
-      _windowsRecordingMode == WindowsRecordingMode.systemLoopback;
+      _windowsRecordingMode == WindowsRecordingMode.systemLoopback ||
+      _windowsRecordingMode == WindowsRecordingMode.systemLoopbackWithMic;
+  bool get _usesWindowsConversationDualAudio =>
+      _isWindowsConversationMode &&
+      _windowsRecordingMode == WindowsRecordingMode.systemLoopbackWithMic;
 
   String get _windowsRecordingModeLabel {
     final l10n = AppLocalizations.of(context)!;
     switch (_windowsRecordingMode) {
       case WindowsRecordingMode.systemLoopback:
         return l10n.recordingModeSystemAudio;
+      case WindowsRecordingMode.microphone:
+        return l10n.recordingModeMicrophone;
+      case WindowsRecordingMode.systemLoopbackWithMic:
+        return '${l10n.recordingModeSystemAudio} + ${l10n.recordingModeMicrophone}';
       case WindowsRecordingMode.processLoopback:
         return l10n.recordingModeChromeAudio;
     }
@@ -302,6 +441,14 @@ class _WsTestPageState extends State<WsTestPage> {
           return _nativeMicOn
               ? l10n.buttonStopSystemAudio
               : l10n.buttonStartSystemAudio;
+        case WindowsRecordingMode.microphone:
+          return _nativeMicOn
+              ? l10n.buttonStopNativeMic
+              : l10n.buttonStartNativeMic;
+        case WindowsRecordingMode.systemLoopbackWithMic:
+          return _nativeMicOn || _windowsUserMicOn
+              ? l10n.buttonStopSystemAudio
+              : l10n.buttonStartSystemAudio;
         case WindowsRecordingMode.processLoopback:
           return _nativeMicOn
               ? l10n.buttonStopChromeAudio
@@ -313,9 +460,15 @@ class _WsTestPageState extends State<WsTestPage> {
 
   String get _nativeCaptureLogLabel {
     if (_isWindowsDesktop) {
-      return _windowsRecordingMode == WindowsRecordingMode.systemLoopback
-          ? 'System audio capture'
-          : 'Chrome audio capture';
+      switch (_windowsRecordingMode) {
+        case WindowsRecordingMode.systemLoopback:
+        case WindowsRecordingMode.systemLoopbackWithMic:
+          return 'System audio capture';
+        case WindowsRecordingMode.microphone:
+          return 'Microphone capture';
+        case WindowsRecordingMode.processLoopback:
+          return 'Chrome audio capture';
+      }
     }
     return 'Native mic';
   }
@@ -377,16 +530,27 @@ class _WsTestPageState extends State<WsTestPage> {
     );
   }
 
-  void _scrollToBottom(ScrollController controller) {
+  void _scrollToBottom(ScrollController controller, {bool jump = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!controller.hasClients) return;
+      if (!mounted || !controller.hasClients) return;
 
-      controller.animateTo(
-        controller.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
+      final target = controller.position.maxScrollExtent;
+      if (jump) {
+        controller.jumpTo(target);
+      } else {
+        controller.animateTo(
+          target,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      }
     });
+  }
+
+  void _scrollAllHistoryToBottom({bool jump = false}) {
+    _scrollToBottom(_jaScrollController, jump: jump);
+    _scrollToBottom(_zhScrollController, jump: jump);
+    _scrollToBottom(_suggestionScrollController, jump: jump);
   }
 
   void _scrollAllToBottomIfNeeded(_AutoScrollDecision decision) {
@@ -414,6 +578,37 @@ class _WsTestPageState extends State<WsTestPage> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _showMicrophonePermissionPrompt() {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(l10n.microphonePermissionRequired),
+        action: SnackBarAction(
+          label: l10n.microphonePermissionOpenSettings,
+          onPressed: () {
+            unawaited(openAppSettings());
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _ensureMicrophonePermission() async {
+    if (kIsWeb) return true;
+    if (!Platform.isAndroid) return true;
+
+    var status = await Permission.microphone.status;
+    if (status.isGranted) return true;
+
+    status = await Permission.microphone.request();
+    if (status.isGranted) return true;
+
+    _log('Android microphone permission denied: $status');
+    _showMicrophonePermissionPrompt();
+    return false;
+  }
+
   Future<bool> _connect() async {
     final wsUrl = AppConfig.wsUrlForMode(widget.session.mode);
     if (wsUrl.isEmpty) {
@@ -427,6 +622,8 @@ class _WsTestPageState extends State<WsTestPage> {
     try {
       final ch = WebSocketChannel.connect(Uri.parse(wsUrl));
       _channel = ch;
+      _loggedFirstAudioChunk = false;
+      _loggedFirstRawPcmChunk = false;
 
       _log('Connecting to $wsUrl ...');
 
@@ -522,15 +719,25 @@ class _WsTestPageState extends State<WsTestPage> {
           } catch (_) {}
         },
         onError: (e) {
+          _socketWritable = false;
           _log('ERROR: $e');
           if (mounted) {
             setState(() => _connected = false);
           }
         },
         onDone: () {
-          _log('DONE (socket closed)');
+          _socketWritable = false;
+          final wasRecording = _isPrimaryRecordingOn;
+          _log(
+            wasRecording
+                ? 'DONE (socket closed while recording)'
+                : 'DONE (socket closed)',
+          );
           if (mounted) {
             setState(() => _connected = false);
+          }
+          if (wasRecording && mounted) {
+            unawaited(_pauseCaptureAfterSocketClose());
           }
         },
       );
@@ -551,9 +758,11 @@ class _WsTestPageState extends State<WsTestPage> {
       if (mounted) {
         setState(() => _connected = true);
       }
+      _socketWritable = true;
       _scheduleSessionPersist(delay: Duration.zero);
       return true;
     } catch (e) {
+      _socketWritable = false;
       _channel?.sink.close();
       _channel = null;
       _log('Connect failed: $e');
@@ -566,6 +775,7 @@ class _WsTestPageState extends State<WsTestPage> {
   }
 
   void _disconnect() {
+    _socketWritable = false;
     _channel?.sink.close();
     _channel = null;
     if (mounted) {
@@ -574,7 +784,55 @@ class _WsTestPageState extends State<WsTestPage> {
     _log('Disconnected');
   }
 
+  Future<void> _pauseCaptureAfterSocketClose() async {
+    if (!mounted) return;
+
+    if (_isWindowsConversationMode) {
+      if (_windowsUserMicOn || _windowsPeerCaptureOn) {
+        await _stopWindowsConversationCapture();
+      } else if (_nativeMicOn) {
+        await _stopNativeMic();
+      }
+    } else if (_nativeMicOn) {
+      await _stopNativeMic();
+    } else if (_flutterMicOn) {
+      await _stopFlutterMic();
+    }
+
+    _log('Audio capture paused after socket close');
+  }
+
   Future<void> _startPrimaryCapture() async {
+    if (_isAndroidSubtitleMode &&
+        _androidSubtitleAudioMode ==
+            AndroidSubtitleAudioMode.systemAudioUnavailable) {
+      _showConnectionError(
+        AppLocalizations.of(context)!.androidSystemAudioUnavailable,
+      );
+      return;
+    }
+
+    if (_needsAndroidMicrophonePermission) {
+      final hasPermission = await _ensureMicrophonePermission();
+      if (!hasPermission) return;
+    }
+
+    if (_isWindowsConversationMode) {
+      if (!_connected) {
+        final connected = await _connect();
+        if (!connected) return;
+      }
+      if (_usesWindowsConversationDualAudio) {
+        await _startWindowsConversationCapture();
+      } else {
+        await _startWindowsConversationSystemOnlyCapture();
+      }
+      if (!_isPrimaryRecordingOn && _connected) {
+        _disconnect();
+      }
+      return;
+    }
+
     if (_supportsNativeMic) {
       if (!_connected) {
         final connected = await _connect();
@@ -600,7 +858,13 @@ class _WsTestPageState extends State<WsTestPage> {
   }
 
   Future<void> _stopPrimaryCapture() async {
-    if (_nativeMicOn) {
+    if (_isWindowsConversationMode) {
+      if (_windowsUserMicOn || _windowsPeerCaptureOn) {
+        await _stopWindowsConversationCapture();
+      } else if (_nativeMicOn) {
+        await _stopNativeMic();
+      }
+    } else if (_nativeMicOn) {
       await _stopNativeMic();
     } else if (_flutterMicOn) {
       await _stopFlutterMic();
@@ -634,6 +898,20 @@ class _WsTestPageState extends State<WsTestPage> {
     _log('SENT request_suggestion');
   }
 
+  void _selectAndroidSubtitleAudioMode(AndroidSubtitleAudioMode mode) {
+    if (!_isAndroidSubtitleMode || _androidSubtitleAudioMode == mode) {
+      return;
+    }
+
+    setState(() => _androidSubtitleAudioMode = mode);
+    _scheduleSessionPersist();
+    if (mode == AndroidSubtitleAudioMode.systemAudioUnavailable) {
+      _showConnectionError(
+        AppLocalizations.of(context)!.androidSystemAudioUnavailable,
+      );
+    }
+  }
+
   Future<void> _handleServerError(Map<String, dynamic> obj) async {
     final stage = (obj['stage'] ?? '').toString();
     final message = (obj['message'] ?? 'Server error').toString();
@@ -644,7 +922,13 @@ class _WsTestPageState extends State<WsTestPage> {
     _showConnectionError(detail);
 
     if (stage == 'stt_connection' && _isPrimaryRecordingOn) {
-      if (_nativeMicOn) {
+      if (_isWindowsConversationMode) {
+        if (_windowsUserMicOn || _windowsPeerCaptureOn) {
+          await _stopWindowsConversationCapture();
+        } else if (_nativeMicOn) {
+          await _stopNativeMic();
+        }
+      } else if (_nativeMicOn) {
         await _stopNativeMic();
       } else if (_flutterMicOn) {
         await _stopFlutterMic();
@@ -658,23 +942,82 @@ class _WsTestPageState extends State<WsTestPage> {
       return;
     }
 
-    if (_nativeMicOn) {
+    final shouldRestartConversationCapture =
+        _isWindowsConversationMode && _isPrimaryRecordingOn;
+
+    if (shouldRestartConversationCapture) {
+      if (_windowsUserMicOn || _windowsPeerCaptureOn) {
+        await _stopWindowsConversationCapture();
+      } else if (_nativeMicOn) {
+        await _stopNativeMic();
+      }
+    } else if (_nativeMicOn) {
       await _stopNativeMic();
     }
 
-    await _nativeRecorder.setWindowsCaptureMode(
-      mode == WindowsRecordingMode.systemLoopback ? 'system' : 'chrome_process',
-    );
+    await _nativeRecorder.setWindowsCaptureMode(_windowsCaptureModeValue(mode));
 
     setState(() {
       _windowsRecordingMode = mode;
     });
+    _scheduleSessionPersist();
 
     _log('Windows recording mode set to $_windowsRecordingModeLabel');
+
+    if (shouldRestartConversationCapture) {
+      if (_usesWindowsConversationDualAudio) {
+        await _startWindowsConversationCapture();
+      } else {
+        await _startWindowsConversationSystemOnlyCapture();
+      }
+    }
+  }
+
+  void _toggleWindowsUserMicMuted() {
+    if (!_isWindowsConversationMode) return;
+    setState(() {
+      _windowsUserMicMuted = !_windowsUserMicMuted;
+    });
+    _log(
+      _windowsUserMicMuted
+          ? 'Conversation microphone muted'
+          : 'Conversation microphone unmuted',
+    );
+  }
+
+  void _setTranscriptionLanguage(String value) {
+    setState(() => _transcriptionLanguage = value);
+    _scheduleSessionPersist();
+  }
+
+  void _setTranslationLanguage(String value) {
+    setState(() => _translationLanguage = value);
+    _scheduleSessionPersist();
+  }
+
+  void _setSummaryLanguage(String value) {
+    setState(() => _summaryLanguage = value);
+    _scheduleSessionPersist();
+  }
+
+  void _setImportantEventLanguage(String value) {
+    setState(() => _importantEventLanguage = value);
+    _scheduleSessionPersist();
   }
 
   @override
   void dispose() {
+    _socketWritable = false;
+    unawaited(_flutterMicSub?.cancel());
+    _flutterMicSub = null;
+    unawaited(_nativeMicSub?.cancel());
+    _nativeMicSub = null;
+    if (_isWindowsDesktop) {
+      unawaited(_nativeRecorder.stopUserMicrophone());
+      unawaited(_nativeRecorder.stopPeerCapture());
+    } else {
+      unawaited(_nativeRecorder.stopRecording());
+    }
     _flushSessionPersist();
     _jaScrollController.dispose();
     _zhScrollController.dispose();
@@ -690,9 +1033,11 @@ class _WsTestPageState extends State<WsTestPage> {
   final BytesBuilder _flutterPcmBuffer = BytesBuilder(copy: false);
 
   final NativeAudioRecorder _nativeRecorder = NativeAudioRecorder();
-  StreamSubscription<Uint8List>? _nativeMicSub;
+  StreamSubscription<NativePcmChunk>? _nativeMicSub;
   bool _nativeMicOn = false;
   final BytesBuilder _nativePcmBuffer = BytesBuilder(copy: false);
+  final BytesBuilder _userMicPcmBuffer = BytesBuilder(copy: false);
+  final BytesBuilder _peerPcmBuffer = BytesBuilder(copy: false);
 
   Uint8List _floatToPcm16LE(List<double> samples) {
     final bytes = BytesBuilder(copy: false);
@@ -734,7 +1079,7 @@ class _WsTestPageState extends State<WsTestPage> {
     int channels = 1,
     int bitsPerSample = 16,
   }) async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await _audioSaveDirectory();
     final filename = '${prefix}_${DateTime.now().millisecondsSinceEpoch}.wav';
     final file = File('${dir.path}/$filename');
 
@@ -784,18 +1129,97 @@ class _WsTestPageState extends State<WsTestPage> {
     return file.path;
   }
 
-  void _sendPcmToServer(Uint8List pcm) {
-    if (_channel == null) return;
+  Future<Directory> _audioSaveDirectory() async {
+    Directory? baseDir;
+
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        baseDir = await getDownloadsDirectory();
+      } catch (_) {}
+
+      if (baseDir == null) {
+        try {
+          final dirs = await getExternalStorageDirectories(
+            type: StorageDirectory.downloads,
+          );
+          if (dirs != null && dirs.isNotEmpty) {
+            baseDir = dirs.first;
+          }
+        } catch (_) {}
+      }
+    }
+
+    baseDir ??= await getApplicationDocumentsDirectory();
+
+    final dir = Directory('${baseDir.path}/FaceAgentAudio');
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  void _sendPcmToServer(
+    Uint8List pcm, {
+    required String source,
+    int sampleRate = 24000,
+    int channels = 1,
+  }) {
+    if (_channel == null || !_socketWritable) return;
 
     const int chunkSize = 640;
     int offset = 0;
+    if (!_loggedFirstAudioChunk) {
+      _loggedFirstAudioChunk = true;
+      _log(
+        'SENT first audio_chunk source=$source sampleRate=$sampleRate channels=$channels bytes=${pcm.length}',
+      );
+    }
 
     while (offset < pcm.length) {
       final end = (offset + chunkSize < pcm.length)
           ? offset + chunkSize
           : pcm.length;
       final chunk = pcm.sublist(offset, end);
-      _channel!.sink.add(chunk);
+      try {
+        _channel!.sink.add(
+          jsonEncode({
+            'type': 'audio_chunk',
+            'source': source,
+            'format': 'pcm16',
+            'sample_rate': sampleRate,
+            'channels': channels,
+            'data': base64Encode(chunk),
+          }),
+        );
+      } catch (e) {
+        _socketWritable = false;
+        _log('Send PCM skipped after socket close: $e');
+        return;
+      }
+      offset = end;
+    }
+  }
+
+  void _sendRawPcmToServer(Uint8List pcm) {
+    if (_channel == null || !_socketWritable) return;
+
+    const int chunkSize = 640;
+    int offset = 0;
+    if (!_loggedFirstRawPcmChunk) {
+      _loggedFirstRawPcmChunk = true;
+      _log('SENT first raw PCM bytes=${pcm.length}');
+    }
+
+    while (offset < pcm.length) {
+      final end = (offset + chunkSize < pcm.length)
+          ? offset + chunkSize
+          : pcm.length;
+      final chunk = pcm.sublist(offset, end);
+      try {
+        _channel!.sink.add(chunk);
+      } catch (e) {
+        _socketWritable = false;
+        _log('Send raw PCM skipped after socket close: $e');
+        return;
+      }
       offset = end;
     }
   }
@@ -809,21 +1233,21 @@ class _WsTestPageState extends State<WsTestPage> {
     if (_flutterMicOn) return;
 
     try {
-      final status = await Permission.microphone.request();
-      if (!status.isGranted) {
+      final hasPermission = await _ensureMicrophonePermission();
+      if (!hasPermission) {
         _log('Flutter mic permission denied');
         return;
       }
 
       _flutterPcmBuffer.clear();
-      _audioStreamer.sampleRate = 16000;
+      _audioStreamer.sampleRate = 24000;
 
       _flutterMicSub = _audioStreamer.audioStream.listen(
         (buffer) {
           try {
             final pcm = _floatToPcm16LE(buffer);
             _flutterPcmBuffer.add(pcm);
-            _sendPcmToServer(pcm);
+            _sendPcmToServer(pcm, source: 'user_mic', sampleRate: 24000);
           } catch (e) {
             _log('Flutter mic record failed: $e');
           }
@@ -867,16 +1291,41 @@ class _WsTestPageState extends State<WsTestPage> {
 
     if (_nativeMicOn) return;
 
+    final hasPermission = await _ensureMicrophonePermission();
+    if (!hasPermission) {
+      _log('$_nativeCaptureLogLabel permission denied');
+      return;
+    }
+
     try {
       _nativePcmBuffer.clear();
+      if (_isWindowsSubtitleMode &&
+          _windowsRecordingMode != WindowsRecordingMode.microphone) {
+        _userMicPcmBuffer.clear();
+      }
 
       _nativeMicSub = _nativeRecorder.pcmStream.listen(
-        (pcm) {
+        (chunk) {
+          if (_isWindowsSubtitleMode && chunk.source == 'user_mic') {
+            _userMicPcmBuffer.add(chunk.pcm);
+            return;
+          }
+
           final processed = (!kIsWeb && Platform.isAndroid)
-              ? _applyGainPcm16LE(pcm, _androidNativeGain)
-              : pcm;
+              ? _applyGainPcm16LE(chunk.pcm, _androidNativeGain)
+              : chunk.pcm;
           _nativePcmBuffer.add(processed);
-          _sendPcmToServer(processed);
+          _sendPcmToServer(
+            processed,
+            source:
+                widget.session.mode == SessionMode.conversation ||
+                    _isAndroidSubtitleMode ||
+                    (_isWindowsSubtitleMode &&
+                        _windowsRecordingMode ==
+                            WindowsRecordingMode.microphone)
+                ? 'user_mic'
+                : 'peer_audio',
+          );
         },
         onError: (e) {
           _log('$_nativeCaptureLogLabel error: $e');
@@ -884,6 +1333,18 @@ class _WsTestPageState extends State<WsTestPage> {
       );
 
       await _nativeRecorder.startRecording();
+      if (_isWindowsSubtitleMode &&
+          _windowsRecordingMode != WindowsRecordingMode.microphone) {
+        try {
+          await _nativeRecorder.startUserMicrophone();
+          if (mounted) {
+            setState(() => _windowsUserMicOn = true);
+          }
+          _log('Subtitle local microphone started for local WAV only');
+        } catch (e) {
+          _log('Start subtitle local microphone failed: $e');
+        }
+      }
 
       setState(() => _nativeMicOn = true);
       _log('$_nativeCaptureLogLabel started');
@@ -894,13 +1355,125 @@ class _WsTestPageState extends State<WsTestPage> {
     }
   }
 
+  Future<void> _startWindowsConversationCapture() async {
+    if (_windowsUserMicOn || _windowsPeerCaptureOn) return;
+
+    try {
+      _userMicPcmBuffer.clear();
+      _peerPcmBuffer.clear();
+
+      _nativeMicSub = _nativeRecorder.pcmStream.listen(
+        (chunk) {
+          if (chunk.source == 'user_mic') {
+            _userMicPcmBuffer.add(chunk.pcm);
+            if (!_windowsUserMicMuted) {
+              _sendPcmToServer(chunk.pcm, source: 'user_mic');
+            }
+          } else {
+            _peerPcmBuffer.add(chunk.pcm);
+            _sendPcmToServer(chunk.pcm, source: 'peer_audio');
+          }
+        },
+        onError: (e) {
+          _log('Conversation capture error: $e');
+        },
+      );
+
+      await _nativeRecorder.startUserMicrophone();
+      await _nativeRecorder.startPeerCapture();
+
+      if (mounted) {
+        setState(() {
+          _windowsUserMicOn = true;
+          _windowsPeerCaptureOn = true;
+          _windowsUserMicMuted = false;
+        });
+      }
+      _log('Conversation microphone started');
+      _log('$_nativeCaptureLogLabel started');
+    } catch (e) {
+      await _nativeMicSub?.cancel();
+      _nativeMicSub = null;
+      _log('Start Windows conversation capture failed: $e');
+    }
+  }
+
+  Future<void> _startWindowsConversationSystemOnlyCapture() async {
+    if (_nativeMicOn) return;
+
+    try {
+      _nativePcmBuffer.clear();
+
+      _nativeMicSub = _nativeRecorder.pcmStream.listen(
+        (chunk) {
+          _nativePcmBuffer.add(chunk.pcm);
+          _sendRawPcmToServer(chunk.pcm);
+        },
+        onError: (e) {
+          _log('Conversation system audio error: $e');
+        },
+      );
+
+      await _nativeRecorder.startRecording();
+
+      if (mounted) {
+        setState(() => _nativeMicOn = true);
+      }
+      _log('Conversation system audio started in raw PCM compatibility mode');
+    } catch (e) {
+      await _nativeMicSub?.cancel();
+      _nativeMicSub = null;
+      _log('Start conversation system audio failed: $e');
+    }
+  }
+
+  Future<void> _stopWindowsConversationCapture() async {
+    try {
+      await _nativeRecorder.stopUserMicrophone();
+      await _nativeRecorder.stopPeerCapture();
+      await _nativeMicSub?.cancel();
+      _nativeMicSub = null;
+
+      if (mounted) {
+        setState(() {
+          _windowsUserMicOn = false;
+          _windowsPeerCaptureOn = false;
+          _windowsUserMicMuted = false;
+        });
+      }
+
+      final userPath = await _savePcmAsWav(
+        pcmBytes: _userMicPcmBuffer.toBytes(),
+        prefix: 'conversation_user_mic',
+      );
+      final peerPath = await _savePcmAsWav(
+        pcmBytes: _peerPcmBuffer.toBytes(),
+        prefix: _windowsRecordingMode == WindowsRecordingMode.processLoopback
+            ? 'conversation_peer_chrome'
+            : 'conversation_peer_system',
+      );
+      _log('Conversation microphone stopped, saved: $userPath');
+      _log('$_nativeCaptureLogLabel stopped, saved: $peerPath');
+    } catch (e) {
+      _log('Stop Windows conversation capture failed: $e');
+    }
+  }
+
   Future<void> _stopNativeMic() async {
     try {
       await _nativeMicSub?.cancel();
       _nativeMicSub = null;
+      if (_isWindowsSubtitleMode && _windowsUserMicOn) {
+        await _nativeRecorder.stopUserMicrophone();
+      }
       await _nativeRecorder.stopRecording();
 
-      setState(() => _nativeMicOn = false);
+      setState(() {
+        _nativeMicOn = false;
+        if (_isWindowsSubtitleMode) {
+          _windowsUserMicOn = false;
+        }
+      });
 
       final pcmBytes = _nativePcmBuffer.toBytes();
       final path = await _savePcmAsWav(
@@ -909,10 +1482,24 @@ class _WsTestPageState extends State<WsTestPage> {
             _isWindowsDesktop &&
                 _windowsRecordingMode == WindowsRecordingMode.processLoopback
             ? 'chrome_audio'
-            : (_usesSystemAudio ? 'system_audio' : 'native_mic'),
+            : (_isWindowsDesktop && _usesSystemAudio
+                  ? 'system_audio'
+                  : 'native_mic'),
       );
 
       _log('$_nativeCaptureLogLabel stopped, saved: $path');
+      if (_isWindowsSubtitleMode) {
+        final userPcmBytes = _userMicPcmBuffer.toBytes();
+        if (userPcmBytes.isNotEmpty) {
+          final userPath = await _savePcmAsWav(
+            pcmBytes: userPcmBytes,
+            prefix: 'subtitle_user_mic',
+          );
+          _log('Subtitle local microphone stopped, saved: $userPath');
+        } else {
+          _log('Subtitle local microphone stopped with no audio data');
+        }
+      }
     } catch (e) {
       _log('Stop $_nativeCaptureLogLabel failed: $e');
     }
@@ -930,46 +1517,8 @@ class _WsTestPageState extends State<WsTestPage> {
       appBar: AppBar(
         title: Text(l10n.sessionPageTitle),
         actions: [
-          if (_isWindowsDesktop)
-            PopupMenuButton<WindowsRecordingMode>(
-              tooltip: l10n.recordingSettings,
-              icon: const Icon(Icons.more_vert),
-              onSelected: (mode) async {
-                await _selectWindowsRecordingMode(mode);
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: WindowsRecordingMode.systemLoopback,
-                  child: Row(
-                    children: [
-                      Icon(
-                        _windowsRecordingMode ==
-                                WindowsRecordingMode.systemLoopback
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_off,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(l10n.recordingModeSystemAudio)),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: WindowsRecordingMode.processLoopback,
-                  child: Row(
-                    children: [
-                      Icon(
-                        _windowsRecordingMode ==
-                                WindowsRecordingMode.processLoopback
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_off,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(l10n.recordingModeChromeAudio)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          if (_isWindowsDesktop) _buildWindowsRecordingMenu(l10n),
+          if (_isAndroidSubtitleMode) _buildAndroidSubtitleAudioMenu(l10n),
         ],
       ),
       body: body,
@@ -985,6 +1534,10 @@ class _WsTestPageState extends State<WsTestPage> {
   }
 
   Widget _buildDefaultBody() {
+    if (_isAndroidSubtitleMode) {
+      return _buildAndroidSubtitleBody();
+    }
+
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -998,7 +1551,10 @@ class _WsTestPageState extends State<WsTestPage> {
                   currentLine: _jaCurrentLine,
                   controller: _jaScrollController,
                   height: 80,
-                  trailing: _buildTranscriptionTrailing(compact: false),
+                  trailing: _buildTranscriptionTrailing(
+                    compact: false,
+                    copyItems: _jaHistory,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 _historyCard(
@@ -1006,12 +1562,17 @@ class _WsTestPageState extends State<WsTestPage> {
                   items: _zhHistory,
                   controller: _zhScrollController,
                   height: 80,
-                  trailing: _buildLanguageDropdown(
-                    value: _translationLanguage,
-                    labels: _translationLanguageLabels,
-                    onChanged: (value) {
-                      setState(() => _translationLanguage = value);
-                    },
+                  trailing: _buildCardTrailing(
+                    compact: false,
+                    copyItems: _zhHistory,
+                    logLabel: 'translation',
+                    control: _buildLanguageDropdown(
+                      value: _translationLanguage,
+                      labels: _translationLanguageLabels,
+                      onChanged: (value) {
+                        _setTranslationLanguage(value);
+                      },
+                    ),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -1020,18 +1581,8 @@ class _WsTestPageState extends State<WsTestPage> {
                   items: _replyItems,
                   controller: _suggestionScrollController,
                   height: 300,
-                  trailing: widget.session.mode == SessionMode.conversation
-                      ? _buildSuggestionRequestButton(compact: false)
-                      : _buildLanguageDropdown(
-                          value: _summaryLanguage,
-                          labels: _summaryLanguageLabels,
-                          onChanged: (value) {
-                            setState(() => _summaryLanguage = value);
-                          },
-                        ),
+                  trailing: _buildReplyTrailing(compact: false),
                 ),
-                const SizedBox(height: 10),
-                _buildLogsSection(compact: false),
               ],
             ),
           ),
@@ -1040,11 +1591,197 @@ class _WsTestPageState extends State<WsTestPage> {
     );
   }
 
+  Widget _buildAndroidSubtitleBody() {
+    return Column(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: _mobileSubtitlePageIndex == 0
+                ? ListView(
+                    children: [
+                      _historyCard(
+                        title: _transcriptionCardTitle,
+                        items: _jaHistory,
+                        currentLine: _jaCurrentLine,
+                        controller: _jaScrollController,
+                        height: 120,
+                        trailing: _buildTranscriptionTrailing(
+                          compact: false,
+                          copyItems: _jaHistory,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _historyCard(
+                        title: _translationCardTitle,
+                        items: _zhHistory,
+                        controller: _zhScrollController,
+                        height: 120,
+                        trailing: _buildCardTrailing(
+                          compact: false,
+                          copyItems: _zhHistory,
+                          logLabel: 'translation',
+                          control: _buildLanguageDropdown(
+                            value: _translationLanguage,
+                            labels: _translationLanguageLabels,
+                            onChanged: (value) {
+                              _setTranslationLanguage(value);
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _historyCard(
+                        title: _replyCardTitle,
+                        items: _replyItems,
+                        controller: _suggestionScrollController,
+                        height: 360,
+                        trailing: _buildReplyTrailing(compact: false),
+                      ),
+                    ],
+                  )
+                : _buildImportantEventsPage(),
+          ),
+        ),
+        NavigationBar(
+          selectedIndex: _mobileSubtitlePageIndex,
+          onDestinationSelected: (index) {
+            setState(() => _mobileSubtitlePageIndex = index);
+            if (index == 0) {
+              _scrollAllHistoryToBottom(jump: true);
+            }
+          },
+          destinations: [
+            NavigationDestination(
+              icon: const Icon(Icons.event_note_rounded),
+              label: AppLocalizations.of(context)!.tooltipSubtitleContent,
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.checklist_sharp),
+              label: AppLocalizations.of(context)!.labelImportantEvents,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWindowsRecordingMenu(AppLocalizations l10n) {
+    return PopupMenuButton<WindowsRecordingMode>(
+      tooltip: l10n.recordingSettings,
+      icon: const Icon(Icons.more_vert),
+      onSelected: (mode) async {
+        await _selectWindowsRecordingMode(mode);
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: WindowsRecordingMode.systemLoopback,
+          child: Row(
+            children: [
+              Icon(
+                _windowsRecordingMode == WindowsRecordingMode.systemLoopback
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_off,
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(l10n.recordingModeSystemAudio)),
+            ],
+          ),
+        ),
+        if (widget.session.mode == SessionMode.subtitle)
+          PopupMenuItem(
+            value: WindowsRecordingMode.microphone,
+            child: Row(
+              children: [
+                Icon(
+                  _windowsRecordingMode == WindowsRecordingMode.microphone
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Text(l10n.recordingModeMicrophone)),
+              ],
+            ),
+          ),
+        if (widget.session.mode == SessionMode.conversation)
+          PopupMenuItem(
+            value: WindowsRecordingMode.systemLoopbackWithMic,
+            child: Row(
+              children: [
+                Icon(
+                  _windowsRecordingMode ==
+                          WindowsRecordingMode.systemLoopbackWithMic
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${l10n.recordingModeSystemAudio} + ${l10n.recordingModeMicrophone}',
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAndroidSubtitleAudioMenu(AppLocalizations l10n) {
+    return PopupMenuButton<AndroidSubtitleAudioMode>(
+      tooltip: l10n.recordingSettings,
+      icon: const Icon(Icons.more_vert),
+      onSelected: _selectAndroidSubtitleAudioMode,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: AndroidSubtitleAudioMode.microphone,
+          child: Row(
+            children: [
+              Icon(
+                _androidSubtitleAudioMode == AndroidSubtitleAudioMode.microphone
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_off,
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(l10n.recordingModeMicrophone)),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: AndroidSubtitleAudioMode.systemAudioUnavailable,
+          child: Row(
+            children: [
+              Icon(
+                _androidSubtitleAudioMode ==
+                        AndroidSubtitleAudioMode.systemAudioUnavailable
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_off,
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(l10n.recordingModeSystemAudio)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildWindowsSidebarBody() {
     return WindowsSessionSidebar(
       connected: _connected,
       isRecording: _isPrimaryRecordingOn,
       recordingModeLabel: _windowsRecordingModeLabel,
+      showMicMuteButton: _isWindowsConversationMode,
+      isMicMuted: _windowsUserMicMuted,
+      onToggleMicMute: _toggleWindowsUserMicMuted,
+      showPageRail: widget.session.mode == SessionMode.subtitle,
+      selectedPageIndex: _windowsSidebarPageIndex,
+      onPageSelected: (index) {
+        setState(() => _windowsSidebarPageIndex = index);
+        if (index == 0) {
+          _scrollAllHistoryToBottom(jump: true);
+        }
+      },
       transcriptCard: _historyCard(
         title: _transcriptionCardTitle,
         items: _jaHistory,
@@ -1052,7 +1789,10 @@ class _WsTestPageState extends State<WsTestPage> {
         controller: _jaScrollController,
         height: null,
         compact: true,
-        trailing: _buildTranscriptionTrailing(compact: true),
+        trailing: _buildTranscriptionTrailing(
+          compact: true,
+          copyItems: _jaHistory,
+        ),
       ),
       translationCard: _historyCard(
         title: _translationCardTitle,
@@ -1060,13 +1800,18 @@ class _WsTestPageState extends State<WsTestPage> {
         controller: _zhScrollController,
         height: null,
         compact: true,
-        trailing: _buildLanguageDropdown(
-          value: _translationLanguage,
-          labels: _translationLanguageLabels,
+        trailing: _buildCardTrailing(
           compact: true,
-          onChanged: (value) {
-            setState(() => _translationLanguage = value);
-          },
+          copyItems: _zhHistory,
+          logLabel: 'translation',
+          control: _buildLanguageDropdown(
+            value: _translationLanguage,
+            labels: _translationLanguageLabels,
+            compact: true,
+            onChanged: (value) {
+              _setTranslationLanguage(value);
+            },
+          ),
         ),
       ),
       replyCard: _historyCard(
@@ -1075,16 +1820,133 @@ class _WsTestPageState extends State<WsTestPage> {
         controller: _suggestionScrollController,
         height: null,
         compact: true,
-        trailing: widget.session.mode == SessionMode.conversation
-            ? _buildSuggestionRequestButton(compact: true)
-            : _buildLanguageDropdown(
-                value: _summaryLanguage,
-                labels: _summaryLanguageLabels,
-                compact: true,
-                onChanged: (value) {
-                  setState(() => _summaryLanguage = value);
-                },
-              ),
+        trailing: _buildReplyTrailing(compact: true),
+      ),
+      secondaryPage: _buildImportantEventsPage(),
+    );
+  }
+
+  Widget _buildImportantEventsPage() {
+    final l10n = AppLocalizations.of(context)!;
+    final items = _importantEventItems;
+    final copyItems = _importantEventCopyItems;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      color: _surfaceSoft,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shadowColor: _shadowColor,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l10n.labelImportantEvents,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2A2D38),
+                    ),
+                  ),
+                ),
+                _buildLanguageDropdown(
+                  value: _importantEventLanguage,
+                  labels: _summaryLanguageLabels,
+                  compact: true,
+                  onChanged: (value) {
+                    _setImportantEventLanguage(value);
+                  },
+                ),
+                const SizedBox(width: 4),
+                _buildCopyButton(
+                  compact: true,
+                  items: copyItems,
+                  logLabel: 'important events',
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: items.isEmpty
+                  ? Align(
+                      alignment: Alignment.topLeft,
+                      child: Text(
+                        l10n.emptyPlaceholder,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF525664),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        final text = item
+                            .textFor(_importantEventLanguage)
+                            .trim();
+                        final meta = item.metaLine;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: index == items.length - 1
+                                ? _accentSoft
+                                : _surfaceMuted,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                margin: const EdgeInsets.only(top: 6, right: 8),
+                                decoration: const BoxDecoration(
+                                  color: _accentText,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (meta.isNotEmpty) ...[
+                                      Text(
+                                        meta,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: _accentText,
+                                          height: 1.2,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                    ],
+                                    SelectableText(
+                                      text,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF262936),
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1106,85 +1968,85 @@ class _WsTestPageState extends State<WsTestPage> {
     );
   }
 
-  Widget _buildTranscriptionTrailing({required bool compact}) {
-    final dropdown = _buildLanguageDropdown(
-      value: _transcriptionLanguage,
-      labels: _transcriptionLanguageLabels,
-      compact: compact,
-      onChanged: (value) {
-        setState(() => _transcriptionLanguage = value);
-      },
+  Widget _buildCopyButton({
+    required bool compact,
+    required List<String> items,
+    required String logLabel,
+  }) {
+    return IconButton(
+      onPressed: () => _copyCardItems(items, logLabel),
+      tooltip: AppLocalizations.of(context)!.tooltipCopyNotes,
+      icon: const Icon(Icons.content_copy_rounded),
+      color: _accentText,
+      style: IconButton.styleFrom(
+        backgroundColor: _surfaceSoft,
+        foregroundColor: _accentText,
+        minimumSize: Size.square(compact ? 30 : 34),
+        padding: EdgeInsets.all(compact ? 6 : 7),
+      ),
     );
+  }
 
-    if (widget.session.mode != SessionMode.subtitle) {
-      return dropdown;
-    }
-
+  Widget _buildCardTrailing({
+    required bool compact,
+    required List<String> copyItems,
+    required String logLabel,
+    required Widget control,
+  }) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        dropdown,
+        control,
         SizedBox(width: compact ? 4 : 6),
-        IconButton(
-          onPressed: _copyNoteSource,
-          tooltip: AppLocalizations.of(context)!.tooltipCopyNotes,
-          icon: const Icon(Icons.content_copy_rounded),
-          color: _accentText,
-          style: IconButton.styleFrom(
-            backgroundColor: _surfaceSoft,
-            foregroundColor: _accentText,
-            minimumSize: Size.square(compact ? 30 : 34),
-            padding: EdgeInsets.all(compact ? 6 : 7),
-          ),
+        _buildCopyButton(
+          compact: compact,
+          items: copyItems,
+          logLabel: logLabel,
         ),
       ],
     );
   }
 
-  Widget _buildLogsSection({required bool compact}) {
-    final l10n = AppLocalizations.of(context)!;
-    return ExpansionTile(
-      tilePadding: compact ? const EdgeInsets.symmetric(horizontal: 8) : null,
-      collapsedBackgroundColor: _surface,
-      backgroundColor: _surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(compact ? 18 : 22),
-      ),
-      collapsedShape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(compact ? 18 : 22),
-      ),
-      title: Text(
-        l10n.labelDebugLogs,
-        style: TextStyle(
-          color: compact ? const Color(0xFF3A3D48) : null,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      children: [
-        SizedBox(
-          height: compact ? 120 : 200,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: _surfaceSoft,
-              borderRadius: BorderRadius.circular(compact ? 16 : 18),
-            ),
-            child: _logs.isEmpty
-                ? Text(l10n.noLogsYet)
-                : ListView.builder(
-                    itemCount: _logs.length,
-                    itemBuilder: (context, i) => Text(
-                      _logs[i],
-                      style: TextStyle(
-                        fontSize: compact ? 12 : 13,
-                        color: const Color(0xFF525664),
-                      ),
-                    ),
-                  ),
-          ),
-        ),
-      ],
+  Widget _buildReplyTrailing({required bool compact}) {
+    final control = widget.session.mode == SessionMode.conversation
+        ? _buildSuggestionRequestButton(compact: compact)
+        : _buildLanguageDropdown(
+            value: _summaryLanguage,
+            labels: _summaryLanguageLabels,
+            compact: compact,
+            onChanged: (value) {
+              _setSummaryLanguage(value);
+            },
+          );
+
+    return _buildCardTrailing(
+      compact: compact,
+      copyItems: _replyItems,
+      logLabel: widget.session.mode == SessionMode.conversation
+          ? 'suggestions'
+          : 'summary',
+      control: control,
+    );
+  }
+
+  Widget _buildTranscriptionTrailing({
+    required bool compact,
+    required List<String> copyItems,
+  }) {
+    final dropdown = _buildLanguageDropdown(
+      value: _transcriptionLanguage,
+      labels: _transcriptionLanguageLabels,
+      compact: compact,
+      onChanged: (value) {
+        _setTranscriptionLanguage(value);
+      },
+    );
+
+    return _buildCardTrailing(
+      compact: compact,
+      copyItems: copyItems,
+      logLabel: 'transcription',
+      control: dropdown,
     );
   }
 

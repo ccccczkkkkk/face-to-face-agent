@@ -23,6 +23,8 @@ ios/.symlinks/
 face_server/
 set_content_test.txt
 utf8_nobom_test.txt
+.codex/
+dist/
 
 # macOS
 .DS_Store
