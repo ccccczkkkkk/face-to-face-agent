@@ -86,6 +86,67 @@ class SessionStorage {
     });
   }
 
+  static Future<Map<String, String>> loadModeDefaults(SessionMode mode) {
+    return _runExclusive(() async {
+      final db = await _openDatabase();
+      try {
+        final rows = db.select(
+          'SELECT value_json FROM app_settings WHERE key = ? LIMIT 1',
+          [_modeDefaultsKey(mode)],
+        );
+        if (rows.isEmpty) {
+          return const <String, String>{};
+        }
+
+        final raw = rows.first['value_json'];
+        if (raw is! String || raw.trim().isEmpty) {
+          return const <String, String>{};
+        }
+
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) {
+          return const <String, String>{};
+        }
+
+        return {
+          for (final entry in decoded.entries)
+            entry.key.toString(): entry.value?.toString() ?? '',
+        };
+      } catch (_) {
+        return const <String, String>{};
+      } finally {
+        db.dispose();
+      }
+    });
+  }
+
+  static Future<void> saveModeDefaults(
+    SessionMode mode,
+    Map<String, String> defaults,
+  ) {
+    return _runExclusive(() async {
+      final db = await _openDatabase();
+      try {
+        db.execute(
+          '''
+          INSERT INTO app_settings (key, value_json, updated_at)
+          VALUES (?, ?, ?)
+          ON CONFLICT(key) DO UPDATE SET
+            value_json = excluded.value_json,
+            updated_at = excluded.updated_at
+          ''',
+          [
+            _modeDefaultsKey(mode),
+            jsonEncode(defaults),
+            DateTime.now().toUtc().toIso8601String(),
+          ],
+        );
+      } finally {
+        db.dispose();
+      }
+    });
+  }
+
   static Future<T> _runExclusive<T>(Future<T> Function() action) {
     final next = _queue.then((_) => action());
     _queue = next.then<void>((_) {}, onError: (_) {});
@@ -117,6 +178,13 @@ class SessionStorage {
     db.execute(
       'CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at)',
     );
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT ''
+      )
+    ''');
   }
 
   static Future<void> _migrateLegacyJsonIfNeeded(Database db) async {
@@ -227,5 +295,9 @@ class SessionStorage {
   static Future<File> _legacyJsonFile() async {
     final dir = await getApplicationDocumentsDirectory();
     return File('${dir.path}/$_legacyJsonFileName');
+  }
+
+  static String _modeDefaultsKey(SessionMode mode) {
+    return 'mode_defaults_${mode.name}';
   }
 }

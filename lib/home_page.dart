@@ -282,6 +282,7 @@ class _HomePageState extends State<HomePage> {
       outline: outline,
       mode: SessionMode.conversation,
     );
+    await SessionSyncService.applyModeDefaults(session);
 
     setState(() {
       _sessions.insert(0, session);
@@ -299,6 +300,7 @@ class _HomePageState extends State<HomePage> {
       outline: '',
       mode: SessionMode.subtitle,
     );
+    await SessionSyncService.applyModeDefaults(session);
 
     setState(() {
       _sessions.insert(0, session);

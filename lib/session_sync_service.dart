@@ -68,6 +68,53 @@ class SessionSyncService {
     await _pushPendingFromStorage();
   }
 
+  static Future<void> applyModeDefaults(ConversationSession session) async {
+    final defaults = await SessionStorage.loadModeDefaults(session.mode);
+    if (defaults.isEmpty) return;
+
+    final transcriptionLanguage = defaults['transcriptionLanguage'];
+    if (transcriptionLanguage != null && transcriptionLanguage.isNotEmpty) {
+      session.transcriptionLanguage = transcriptionLanguage;
+    }
+
+    final translationLanguage = defaults['translationLanguage'];
+    if (translationLanguage != null && translationLanguage.isNotEmpty) {
+      session.translationLanguage = translationLanguage;
+    }
+
+    final summaryLanguage = defaults['summaryLanguage'];
+    if (summaryLanguage != null && summaryLanguage.isNotEmpty) {
+      session.summaryLanguage = summaryLanguage;
+    }
+
+    final importantEventLanguage = defaults['importantEventLanguage'];
+    if (importantEventLanguage != null && importantEventLanguage.isNotEmpty) {
+      session.importantEventLanguage = importantEventLanguage;
+    }
+
+    final windowsRecordingMode = defaults['windowsRecordingMode'];
+    if (windowsRecordingMode != null && windowsRecordingMode.isNotEmpty) {
+      session.windowsRecordingMode = windowsRecordingMode;
+    }
+
+    final androidSubtitleAudioMode = defaults['androidSubtitleAudioMode'];
+    if (androidSubtitleAudioMode != null &&
+        androidSubtitleAudioMode.isNotEmpty) {
+      session.androidSubtitleAudioMode = androidSubtitleAudioMode;
+    }
+  }
+
+  static Future<void> saveModeDefaults(ConversationSession session) async {
+    await SessionStorage.saveModeDefaults(session.mode, {
+      'transcriptionLanguage': session.transcriptionLanguage,
+      'translationLanguage': session.translationLanguage,
+      'summaryLanguage': session.summaryLanguage,
+      'importantEventLanguage': session.importantEventLanguage,
+      'windowsRecordingMode': session.windowsRecordingMode,
+      'androidSubtitleAudioMode': session.androidSubtitleAudioMode,
+    });
+  }
+
   static SessionSyncClient get _syncClient {
     final baseUrls = AppConfig.syncUrls;
     final existing = _client;

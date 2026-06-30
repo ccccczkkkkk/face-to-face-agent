@@ -25,6 +25,8 @@ set_content_test.txt
 utf8_nobom_test.txt
 .codex/
 dist/
+AGENTS.md
+docs/
 
 # macOS
 .DS_Store

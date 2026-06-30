@@ -376,6 +376,11 @@ class _WsTestPageState extends State<WsTestPage> {
     });
   }
 
+  void _scheduleSessionPersistAndRememberModeDefaults() {
+    _scheduleSessionPersist();
+    unawaited(SessionSyncService.saveModeDefaults(widget.session));
+  }
+
   Future<void> _flushSessionPersist() async {
     _syncSession();
     _sessionPersistTimer?.cancel();
@@ -1101,7 +1106,7 @@ class _WsTestPageState extends State<WsTestPage> {
     }
 
     setState(() => _androidSubtitleAudioMode = mode);
-    _scheduleSessionPersist();
+    _scheduleSessionPersistAndRememberModeDefaults();
     if (mode == AndroidSubtitleAudioMode.systemAudioUnavailable) {
       _showConnectionError(
         AppLocalizations.of(context)!.androidSystemAudioUnavailable,
@@ -1157,7 +1162,7 @@ class _WsTestPageState extends State<WsTestPage> {
     setState(() {
       _windowsRecordingMode = mode;
     });
-    _scheduleSessionPersist();
+    _scheduleSessionPersistAndRememberModeDefaults();
 
     _log('Windows recording mode set to $_windowsRecordingModeLabel');
 
@@ -1184,22 +1189,22 @@ class _WsTestPageState extends State<WsTestPage> {
 
   void _setTranscriptionLanguage(String value) {
     setState(() => _transcriptionLanguage = value);
-    _scheduleSessionPersist();
+    _scheduleSessionPersistAndRememberModeDefaults();
   }
 
   void _setTranslationLanguage(String value) {
     setState(() => _translationLanguage = value);
-    _scheduleSessionPersist();
+    _scheduleSessionPersistAndRememberModeDefaults();
   }
 
   void _setSummaryLanguage(String value) {
     setState(() => _summaryLanguage = value);
-    _scheduleSessionPersist();
+    _scheduleSessionPersistAndRememberModeDefaults();
   }
 
   void _setImportantEventLanguage(String value) {
     setState(() => _importantEventLanguage = value);
-    _scheduleSessionPersist();
+    _scheduleSessionPersistAndRememberModeDefaults();
   }
 
   @override
