@@ -1,5 +1,29 @@
 enum SessionMode { conversation, subtitle }
 
+enum SessionSyncStatus { synced, pending, failed }
+
+String _nowIso() => DateTime.now().toUtc().toIso8601String();
+
+String _stringOrEmpty(dynamic value) => value?.toString() ?? '';
+
+String _timestampFromSessionId(String id) {
+  final millis = int.tryParse(id);
+  if (millis == null) return _nowIso();
+  return DateTime.fromMillisecondsSinceEpoch(millis).toUtc().toIso8601String();
+}
+
+SessionSyncStatus _syncStatusFromJson(dynamic value) {
+  final raw = value?.toString().trim() ?? '';
+  if (raw.isEmpty) {
+    return SessionSyncStatus.pending;
+  }
+  return switch (raw) {
+    'pending' => SessionSyncStatus.pending,
+    'failed' => SessionSyncStatus.failed,
+    _ => SessionSyncStatus.synced,
+  };
+}
+
 class ImportantEventItem {
   String id;
   String kind;
@@ -177,6 +201,11 @@ class ConversationSession {
   String title;
   String outline;
   SessionMode mode;
+  String createdAt;
+  String updatedAt;
+  String deletedAt;
+  SessionSyncStatus syncStatus;
+  String lastSyncedAt;
 
   List<String> jaHistory;
   List<String> zhHistory;
@@ -194,6 +223,11 @@ class ConversationSession {
     required this.title,
     required this.outline,
     this.mode = SessionMode.conversation,
+    String? createdAt,
+    String? updatedAt,
+    this.deletedAt = '',
+    this.syncStatus = SessionSyncStatus.pending,
+    this.lastSyncedAt = '',
     List<String>? jaHistory,
     List<String>? zhHistory,
     List<String>? suggestionHistory,
@@ -204,20 +238,38 @@ class ConversationSession {
     this.importantEventLanguage = 'source',
     this.windowsRecordingMode = '',
     this.androidSubtitleAudioMode = '',
-  }) : jaHistory = jaHistory ?? [],
+  }) : createdAt = createdAt ?? _timestampFromSessionId(id),
+       updatedAt = updatedAt ?? createdAt ?? _timestampFromSessionId(id),
+       jaHistory = jaHistory ?? [],
        zhHistory = zhHistory ?? [],
        suggestionHistory = suggestionHistory ?? [],
        summaryHistory = summaryHistory ?? [];
 
   factory ConversationSession.fromJson(Map<String, dynamic> json) {
+    final id = _stringOrEmpty(json['id']).trim();
+    if (id.isEmpty) {
+      throw ArgumentError('ConversationSession.id is required');
+    }
+    final fallbackTimestamp = _timestampFromSessionId(id);
     return ConversationSession(
-      id: json['id'] as String,
-      title: json['title'] as String,
-      outline: json['outline'] as String,
+      id: id,
+      title: _stringOrEmpty(json['title']).isNotEmpty
+          ? _stringOrEmpty(json['title'])
+          : 'Untitled',
+      outline: _stringOrEmpty(json['outline']),
       mode: switch ((json['mode'] ?? 'conversation').toString()) {
         'subtitle' => SessionMode.subtitle,
         _ => SessionMode.conversation,
       },
+      createdAt: _stringOrEmpty(json['createdAt']).isNotEmpty
+          ? _stringOrEmpty(json['createdAt'])
+          : fallbackTimestamp,
+      updatedAt: _stringOrEmpty(json['updatedAt']).isNotEmpty
+          ? _stringOrEmpty(json['updatedAt'])
+          : fallbackTimestamp,
+      deletedAt: _stringOrEmpty(json['deletedAt']),
+      syncStatus: _syncStatusFromJson(json['syncStatus']),
+      lastSyncedAt: _stringOrEmpty(json['lastSyncedAt']),
       jaHistory: (json['jaHistory'] as List<dynamic>? ?? [])
           .map((e) => e.toString())
           .toList(),
@@ -272,6 +324,11 @@ class ConversationSession {
       'title': title,
       'outline': outline,
       'mode': mode.name,
+      'createdAt': createdAt,
+      'updatedAt': updatedAt,
+      'deletedAt': deletedAt,
+      'syncStatus': syncStatus.name,
+      'lastSyncedAt': lastSyncedAt,
       'jaHistory': jaHistory,
       'zhHistory': zhHistory,
       'suggestionHistory': suggestionHistory,
@@ -284,4 +341,55 @@ class ConversationSession {
       'summaryHistory': summaryHistory.map((entry) => entry.toJson()).toList(),
     };
   }
+
+  bool get isDeleted => deletedAt.trim().isNotEmpty;
+
+  DateTime get createdDate => _parseIsoOrFallback(createdAt, id);
+
+  DateTime get updatedDate => _parseIsoOrFallback(updatedAt, id);
+
+  DateTime get changedDate {
+    if (deletedAt.trim().isNotEmpty) {
+      return _parseIsoOrFallback(deletedAt, id);
+    }
+    return updatedDate;
+  }
+
+  void markChanged() {
+    updatedAt = _nowIso();
+    if (!isDeleted) {
+      deletedAt = '';
+    }
+    syncStatus = SessionSyncStatus.pending;
+  }
+
+  void markDeleted() {
+    final now = _nowIso();
+    updatedAt = now;
+    deletedAt = now;
+    syncStatus = SessionSyncStatus.pending;
+  }
+
+  void markSynced() {
+    syncStatus = SessionSyncStatus.synced;
+    lastSyncedAt = _nowIso();
+  }
+
+  void markSyncFailed() {
+    if (syncStatus != SessionSyncStatus.synced) {
+      syncStatus = SessionSyncStatus.failed;
+    }
+  }
+}
+
+DateTime _parseIsoOrFallback(String value, String id) {
+  final parsed = DateTime.tryParse(value);
+  if (parsed != null) return parsed.toLocal();
+
+  final millis = int.tryParse(id);
+  if (millis != null) {
+    return DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
+  return DateTime.now();
 }

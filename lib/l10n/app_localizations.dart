@@ -466,6 +466,24 @@ abstract class AppLocalizations {
   /// **'待命 - {mode}'**
   String statusReady(Object mode);
 
+  /// No description provided for @statusRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音中'**
+  String get statusRecording;
+
+  /// No description provided for @androidNotificationConnected.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连接 - {mode}'**
+  String androidNotificationConnected(Object mode);
+
+  /// No description provided for @androidNotificationRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音中 - {mode}'**
+  String androidNotificationRecording(Object mode);
+
   /// No description provided for @emptyPlaceholder.
   ///
   /// In zh, this message translates to:

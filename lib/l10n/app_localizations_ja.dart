@@ -200,6 +200,19 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get statusRecording => '録音中';
+
+  @override
+  String androidNotificationConnected(Object mode) {
+    return '接続中 - $mode';
+  }
+
+  @override
+  String androidNotificationRecording(Object mode) {
+    return '録音中 - $mode';
+  }
+
+  @override
   String get emptyPlaceholder => 'まだ内容はありません。';
 
   @override

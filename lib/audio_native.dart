@@ -65,4 +65,21 @@ class NativeAudioRecorder {
   Future<void> stopPeerCapture() async {
     await _control.invokeMethod('stopPeerCapture');
   }
+
+  Future<bool> showStatusNotification({
+    required String title,
+    required String text,
+    required bool recording,
+  }) async {
+    final shown = await _control.invokeMethod<bool>('showStatusNotification', {
+      'title': title,
+      'text': text,
+      'recording': recording,
+    });
+    return shown ?? false;
+  }
+
+  Future<void> clearStatusNotification() async {
+    await _control.invokeMethod('clearStatusNotification');
+  }
 }

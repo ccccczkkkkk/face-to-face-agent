@@ -16,7 +16,7 @@ import 'audio_native.dart';
 import 'conversation_session.dart';
 import 'l10n/app_localizations.dart';
 import 'session_defaults.dart';
-import 'session_storage.dart';
+import 'session_sync_service.dart';
 import 'windows_session_sidebar.dart';
 
 class WsTestPage extends StatefulWidget {
@@ -54,6 +54,9 @@ class _WsTestPageState extends State<WsTestPage> {
   final List<String> _logs = [];
   bool _connected = false;
   bool _socketWritable = false;
+  int _connectionGeneration = 0;
+  bool _finishingBeforeExit = false;
+  Completer<void>? _finalizeCompleter;
   bool _loggedFirstAudioChunk = false;
   bool _loggedFirstRawPcmChunk = false;
 
@@ -366,7 +369,7 @@ class _WsTestPageState extends State<WsTestPage> {
     _sessionPersistTimer?.cancel();
     _sessionPersistTimer = Timer(delay, () async {
       try {
-        await SessionStorage.saveSession(widget.session);
+        await SessionSyncService.saveSession(widget.session);
       } catch (e) {
         debugPrint('Session autosave failed: $e');
       }
@@ -378,7 +381,7 @@ class _WsTestPageState extends State<WsTestPage> {
     _sessionPersistTimer?.cancel();
     _sessionPersistTimer = null;
     try {
-      await SessionStorage.saveSession(widget.session);
+      await SessionSyncService.saveSession(widget.session);
     } catch (e) {
       debugPrint('Session save failed: $e');
     }
@@ -391,6 +394,7 @@ class _WsTestPageState extends State<WsTestPage> {
   final double _androidNativeGain = 4.0;
 
   bool get _isWindowsDesktop => !kIsWeb && Platform.isWindows;
+  bool get _isAndroidDevice => !kIsWeb && Platform.isAndroid;
   bool get _supportsFlutterMic =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
   bool get _supportsNativeMic =>
@@ -418,6 +422,14 @@ class _WsTestPageState extends State<WsTestPage> {
   bool get _usesWindowsConversationDualAudio =>
       _isWindowsConversationMode &&
       _windowsRecordingMode == WindowsRecordingMode.systemLoopbackWithMic;
+
+  String get _sessionNotificationModeLabel {
+    final l10n = AppLocalizations.of(context)!;
+    return switch (widget.session.mode) {
+      SessionMode.conversation => l10n.sessionModeConversation,
+      SessionMode.subtitle => l10n.sessionModeSubtitle,
+    };
+  }
 
   String get _windowsRecordingModeLabel {
     final l10n = AppLocalizations.of(context)!;
@@ -609,179 +621,332 @@ class _WsTestPageState extends State<WsTestPage> {
     return false;
   }
 
+  Future<void> _ensureAndroidNotificationPermission() async {
+    if (!_isAndroidDevice) return;
+
+    final status = await Permission.notification.status;
+    if (status.isGranted) return;
+    await Permission.notification.request();
+  }
+
+  Future<void> _syncAndroidStatusNotification() async {
+    if (!_isAndroidDevice) return;
+
+    try {
+      if (!_connected && !_isPrimaryRecordingOn) {
+        await _nativeRecorder.clearStatusNotification();
+        return;
+      }
+
+      await _ensureAndroidNotificationPermission();
+      if (!mounted) return;
+
+      final l10n = AppLocalizations.of(context)!;
+      final mode = _sessionNotificationModeLabel;
+      final recording = _isPrimaryRecordingOn;
+      final text = recording
+          ? l10n.androidNotificationRecording(mode)
+          : l10n.androidNotificationConnected(mode);
+
+      await _nativeRecorder.showStatusNotification(
+        title: l10n.appTitle,
+        text: text,
+        recording: recording,
+      );
+    } catch (e) {
+      _log('Android status notification update failed: $e');
+    }
+  }
+
+  Future<void> _clearAndroidStatusNotification() async {
+    if (!_isAndroidDevice) return;
+
+    try {
+      await _nativeRecorder.clearStatusNotification();
+    } catch (e) {
+      _log('Android status notification clear failed: $e');
+    }
+  }
+
   Future<bool> _connect() async {
-    final wsUrl = AppConfig.wsUrlForMode(widget.session.mode);
-    if (wsUrl.isEmpty) {
+    final wsUrls = AppConfig.wsUrlsForMode(widget.session.mode);
+    if (wsUrls.isEmpty) {
       const message =
-          'Connect failed: WS_URL is missing. Please set it in .env';
+          'Connect failed: WS_URL/WS_URLS is missing. Please set it in .env';
       _log(message);
       _showConnectionError(message);
       return false;
     }
 
-    try {
-      final ch = WebSocketChannel.connect(Uri.parse(wsUrl));
-      _channel = ch;
-      _loggedFirstAudioChunk = false;
-      _loggedFirstRawPcmChunk = false;
+    Object? lastError;
+    for (final wsUrl in wsUrls) {
+      WebSocketChannel? ch;
+      try {
+        ch = WebSocketChannel.connect(Uri.parse(wsUrl));
+        final generation = ++_connectionGeneration;
+        _channel = ch;
+        _loggedFirstAudioChunk = false;
+        _loggedFirstRawPcmChunk = false;
 
-      _log('Connecting to $wsUrl ...');
+        _log('Connecting to $wsUrl ...');
+        _listenToServerChannel(ch, generation);
 
-      ch.stream.listen(
-        (event) {
-          final s = event.toString();
-          _log('RECV: $s');
+        await ch.ready.timeout(const Duration(seconds: 3));
 
-          try {
-            final obj = jsonDecode(s);
+        final cfg = {
+          'type': 'config',
+          'session_id': widget.session.id,
+          'outline': _outlineCtl.text,
+          'mode': widget.session.mode.name,
+          'transcription_language': _transcriptionLanguage,
+          'translation_language': _translationLanguage,
+        };
+        ch.sink.add(jsonEncode(cfg));
+        _log('SENT config');
 
-            if (obj is Map<String, dynamic>) {
-              final type = (obj['type'] ?? '').toString();
-              if (type == 'error') {
-                unawaited(_handleServerError(obj));
-                return;
-              }
-              final decision = _captureAutoScrollDecision();
+        if (mounted) {
+          setState(() => _connected = true);
+        }
+        _socketWritable = true;
+        _finalizeCompleter = null;
+        unawaited(_syncAndroidStatusNotification());
+        _scheduleSessionPersist(delay: Duration.zero);
+        return true;
+      } catch (e) {
+        lastError = e;
+        if (identical(_channel, ch)) {
+          _socketWritable = false;
+          _channel = null;
+          if (mounted) {
+            setState(() => _connected = false);
+          }
+          unawaited(_syncAndroidStatusNotification());
+        }
+        ch?.sink.close();
+        _log('Connect failed for $wsUrl: $e');
+      }
+    }
 
-              setState(() {
-                if (type == 'transcript_delta') {
-                  final delta = (obj['delta'] ?? obj['transcript'] ?? '')
-                      .toString();
-                  if (delta.isNotEmpty) {
-                    _jaCurrentLine += delta;
-                  }
-                } else if (type == 'transcript_final') {
-                  final ja = (obj['transcript'] ?? '').toString();
-                  final segmentId = (obj['segment_id'] ?? '').toString();
-                  final finalLine = ja.isNotEmpty ? ja : _jaCurrentLine;
+    if (mounted) {
+      _showConnectionError(AppLocalizations.of(context)!.statusReady('Server'));
+    }
+    _log('Connect failed for all WS URLs: $lastError');
+    unawaited(_syncAndroidStatusNotification());
+    return false;
+  }
 
-                  if (finalLine.isNotEmpty) {
-                    _upsertTranscriptSegment(
-                      transcript: finalLine,
-                      segmentId: segmentId,
-                    );
-                    _scheduleSessionPersist();
-                  }
-                  _jaCurrentLine = '';
+  void _listenToServerChannel(WebSocketChannel ch, int generation) {
+    ch.stream.listen(
+      (event) {
+        if (generation != _connectionGeneration || !identical(_channel, ch)) {
+          return;
+        }
+        final s = event.toString();
+        _log('RECV: $s');
+
+        try {
+          final obj = jsonDecode(s);
+
+          if (obj is Map<String, dynamic>) {
+            final type = (obj['type'] ?? '').toString();
+            if (type == 'error') {
+              unawaited(_handleServerError(obj));
+              return;
+            }
+            if (type == 'finalize_complete') {
+              _completeFinalizeWaiter();
+              _log('Server finalize complete');
+              return;
+            }
+            final decision = _captureAutoScrollDecision();
+
+            setState(() {
+              if (type == 'transcript_delta') {
+                final delta = (obj['delta'] ?? obj['transcript'] ?? '')
+                    .toString();
+                if (delta.isNotEmpty) {
+                  _jaCurrentLine += delta;
+                }
+              } else if (type == 'transcript_final') {
+                final ja = (obj['transcript'] ?? '').toString();
+                final segmentId = (obj['segment_id'] ?? '').toString();
+                final finalLine = ja.isNotEmpty ? ja : _jaCurrentLine;
+
+                if (finalLine.isNotEmpty) {
+                  _upsertTranscriptSegment(
+                    transcript: finalLine,
+                    segmentId: segmentId,
+                  );
                   _scheduleSessionPersist();
-                } else if (type == 'suggestion') {
-                  final zh = (obj['zh_translation'] ?? '').toString();
-                  final segmentId = (obj['segment_id'] ?? '').toString();
+                }
+                _jaCurrentLine = '';
+                _scheduleSessionPersist();
+              } else if (type == 'suggestion') {
+                final zh = (obj['zh_translation'] ?? '').toString();
+                final segmentId = (obj['segment_id'] ?? '').toString();
 
-                  if (zh.isNotEmpty &&
-                      _applyTranslationToSegment(zh, segmentId: segmentId)) {
-                    _scheduleSessionPersist();
-                  }
+                if (zh.isNotEmpty &&
+                    _applyTranslationToSegment(zh, segmentId: segmentId)) {
+                  _scheduleSessionPersist();
+                }
 
-                  final ns = obj['next_say'];
-                  if (ns is List && ns.isNotEmpty) {
-                    final lines = <String>[];
-                    for (final item in ns) {
-                      if (item is Map) {
-                        final jaLine = (item['ja'] ?? '').toString();
-                        final romaji = (item['romaji'] ?? '').toString();
-                        final zhLine = (item['zh'] ?? '').toString();
+                final ns = obj['next_say'];
+                if (ns is List && ns.isNotEmpty) {
+                  final lines = <String>[];
+                  for (final item in ns) {
+                    if (item is Map) {
+                      final jaLine = (item['ja'] ?? '').toString();
+                      final romaji = (item['romaji'] ?? '').toString();
+                      final zhLine = (item['zh'] ?? '').toString();
 
-                        final parts = <String>[];
-                        if (jaLine.isNotEmpty) parts.add(jaLine);
-                        if (romaji.isNotEmpty) parts.add(romaji);
-                        if (zhLine.isNotEmpty) parts.add(zhLine);
+                      final parts = <String>[];
+                      if (jaLine.isNotEmpty) parts.add(jaLine);
+                      if (romaji.isNotEmpty) parts.add(romaji);
+                      if (zhLine.isNotEmpty) parts.add(zhLine);
 
-                        if (parts.isNotEmpty) {
-                          lines.add(parts.join('\n'));
-                        }
+                      if (parts.isNotEmpty) {
+                        lines.add(parts.join('\n'));
                       }
                     }
-
-                    final block = lines.join('\n\n');
-                    if (block.isNotEmpty) {
-                      _suggestionHistory.add(block);
-                      _scheduleSessionPersist();
-                    }
                   }
-                } else if (type == 'summary') {
-                  _upsertSummary(obj);
-                  _scheduleSessionPersist();
-                } else if (type == 'subtitle_translation' ||
-                    type == 'translation') {
-                  final segmentId = (obj['segment_id'] ?? '').toString();
-                  final zh = (obj['translation'] ?? obj['zh_translation'] ?? '')
-                      .toString();
-                  if (zh.isNotEmpty &&
-                      _applyTranslationToSegment(zh, segmentId: segmentId)) {
+
+                  final block = lines.join('\n\n');
+                  if (block.isNotEmpty) {
+                    _suggestionHistory.add(block);
                     _scheduleSessionPersist();
                   }
                 }
-              });
+              } else if (type == 'summary') {
+                _upsertSummary(obj);
+                _scheduleSessionPersist();
+              } else if (type == 'subtitle_translation' ||
+                  type == 'translation') {
+                final segmentId = (obj['segment_id'] ?? '').toString();
+                final zh = (obj['translation'] ?? obj['zh_translation'] ?? '')
+                    .toString();
+                if (zh.isNotEmpty &&
+                    _applyTranslationToSegment(zh, segmentId: segmentId)) {
+                  _scheduleSessionPersist();
+                }
+              }
+            });
 
-              _scrollAllToBottomIfNeeded(decision);
-            }
-          } catch (_) {}
-        },
-        onError: (e) {
-          _socketWritable = false;
-          _log('ERROR: $e');
-          if (mounted) {
-            setState(() => _connected = false);
+            _scrollAllToBottomIfNeeded(decision);
           }
-        },
-        onDone: () {
-          _socketWritable = false;
-          final wasRecording = _isPrimaryRecordingOn;
-          _log(
-            wasRecording
-                ? 'DONE (socket closed while recording)'
-                : 'DONE (socket closed)',
-          );
-          if (mounted) {
-            setState(() => _connected = false);
-          }
-          if (wasRecording && mounted) {
-            unawaited(_pauseCaptureAfterSocketClose());
-          }
-        },
-      );
+        } catch (_) {}
+      },
+      onError: (e) {
+        if (generation != _connectionGeneration || !identical(_channel, ch)) {
+          return;
+        }
+        _socketWritable = false;
+        _completeFinalizeWaiter();
+        _log('ERROR: $e');
+        if (mounted) {
+          setState(() => _connected = false);
+        }
+        unawaited(_syncAndroidStatusNotification());
+      },
+      onDone: () {
+        if (generation != _connectionGeneration || !identical(_channel, ch)) {
+          return;
+        }
+        _socketWritable = false;
+        _completeFinalizeWaiter();
+        final wasRecording = _isPrimaryRecordingOn;
+        _log(
+          wasRecording
+              ? 'DONE (socket closed while recording)'
+              : 'DONE (socket closed)',
+        );
+        if (mounted) {
+          setState(() => _connected = false);
+        }
+        unawaited(_syncAndroidStatusNotification());
+        if (wasRecording && mounted) {
+          unawaited(_pauseCaptureAfterSocketClose());
+        }
+      },
+    );
+  }
 
-      await ch.ready.timeout(const Duration(seconds: 3));
-
-      final cfg = {
-        'type': 'config',
-        'session_id': widget.session.id,
-        'outline': _outlineCtl.text,
-        'mode': widget.session.mode.name,
-        'transcription_language': _transcriptionLanguage,
-        'translation_language': _translationLanguage,
-      };
-      ch.sink.add(jsonEncode(cfg));
-      _log('SENT config');
-
-      if (mounted) {
-        setState(() => _connected = true);
-      }
-      _socketWritable = true;
-      _scheduleSessionPersist(delay: Duration.zero);
-      return true;
-    } catch (e) {
+  void _disconnect({WebSocketChannel? expectedChannel}) {
+    final channel = expectedChannel ?? _channel;
+    if (expectedChannel == null || identical(_channel, expectedChannel)) {
+      _connectionGeneration++;
       _socketWritable = false;
-      _channel?.sink.close();
+      _completeFinalizeWaiter();
       _channel = null;
-      _log('Connect failed: $e');
       if (mounted) {
         setState(() => _connected = false);
       }
-      _showConnectionError(AppLocalizations.of(context)!.statusReady('Server'));
-      return false;
+      _log('Disconnected');
+      unawaited(_syncAndroidStatusNotification());
+    } else {
+      _log('Skipped disconnect for stale socket');
     }
+    channel?.sink.close();
   }
 
-  void _disconnect() {
+  void _detachCurrentSocketForNewRecording() {
+    if (_channel == null) return;
+    _connectionGeneration++;
     _socketWritable = false;
-    _channel?.sink.close();
     _channel = null;
     if (mounted) {
       setState(() => _connected = false);
     }
-    _log('Disconnected');
+    _log('Detached previous socket for new recording');
+    unawaited(_syncAndroidStatusNotification());
+  }
+
+  bool _isCurrentChannel(WebSocketChannel channel) {
+    return identical(_channel, channel);
+  }
+
+  bool _isSocketWritableFor(WebSocketChannel channel) {
+    return _connected && _socketWritable && _isCurrentChannel(channel);
+  }
+
+  void _completeFinalizeWaiter() {
+    final completer = _finalizeCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+  }
+
+  Future<void> _requestServerFinalize({
+    required String reason,
+    Duration timeout = const Duration(seconds: 3),
+    bool waitForComplete = true,
+  }) async {
+    final channel = _channel;
+    if (channel == null || !_isSocketWritableFor(channel)) {
+      return;
+    }
+
+    final completer = waitForComplete ? Completer<void>() : null;
+    if (completer != null) {
+      _finalizeCompleter = completer;
+    }
+    try {
+      channel.sink.add(jsonEncode({'type': 'finalize', 'reason': reason}));
+      _log('SENT finalize ($reason)');
+      if (completer == null) return;
+      await completer.future.timeout(timeout);
+    } on TimeoutException {
+      if (_isCurrentChannel(channel)) {
+        _log('Server finalize timed out');
+      } else {
+        _log('Server finalize timed out for stale socket');
+      }
+    } catch (e) {
+      _log('Server finalize failed: $e');
+    } finally {
+      if (completer != null && identical(_finalizeCompleter, completer)) {
+        _finalizeCompleter = null;
+      }
+    }
   }
 
   Future<void> _pauseCaptureAfterSocketClose() async {
@@ -817,11 +982,19 @@ class _WsTestPageState extends State<WsTestPage> {
       if (!hasPermission) return;
     }
 
-    if (_isWindowsConversationMode) {
-      if (!_connected) {
-        final connected = await _connect();
-        if (!connected) return;
+    // A fresh socket per recording avoids stale finalize/reset state leaking
+    // into the next capture when the user switches audio sources quickly.
+    if (_channel != null || _connected || _finalizeCompleter != null) {
+      if (_finalizeCompleter != null && _channel != null) {
+        _detachCurrentSocketForNewRecording();
+      } else {
+        _disconnect();
       }
+    }
+
+    if (_isWindowsConversationMode) {
+      final connected = await _connect();
+      if (!connected) return;
       if (_usesWindowsConversationDualAudio) {
         await _startWindowsConversationCapture();
       } else {
@@ -834,10 +1007,8 @@ class _WsTestPageState extends State<WsTestPage> {
     }
 
     if (_supportsNativeMic) {
-      if (!_connected) {
-        final connected = await _connect();
-        if (!connected) return;
-      }
+      final connected = await _connect();
+      if (!connected) return;
       await _startNativeMic();
       if (!_isPrimaryRecordingOn && _connected) {
         _disconnect();
@@ -846,10 +1017,8 @@ class _WsTestPageState extends State<WsTestPage> {
     }
 
     if (_supportsFlutterMic) {
-      if (!_connected) {
-        final connected = await _connect();
-        if (!connected) return;
-      }
+      final connected = await _connect();
+      if (!connected) return;
       await _startFlutterMic();
       if (!_isPrimaryRecordingOn && _connected) {
         _disconnect();
@@ -857,7 +1026,7 @@ class _WsTestPageState extends State<WsTestPage> {
     }
   }
 
-  Future<void> _stopPrimaryCapture() async {
+  Future<void> _stopLocalCaptureOnly() async {
     if (_isWindowsConversationMode) {
       if (_windowsUserMicOn || _windowsPeerCaptureOn) {
         await _stopWindowsConversationCapture();
@@ -869,9 +1038,16 @@ class _WsTestPageState extends State<WsTestPage> {
     } else if (_flutterMicOn) {
       await _stopFlutterMic();
     }
+  }
 
-    if (_connected) {
-      _disconnect();
+  Future<void> _stopPrimaryCapture({
+    String finalizeReason = 'pause_capture',
+  }) async {
+    await _stopLocalCaptureOnly();
+    final finalizeChannel = _channel;
+    if (finalizeChannel != null && _isSocketWritableFor(finalizeChannel)) {
+      await _requestServerFinalize(reason: finalizeReason);
+      _disconnect(expectedChannel: finalizeChannel);
     }
   }
 
@@ -880,6 +1056,27 @@ class _WsTestPageState extends State<WsTestPage> {
       await _stopPrimaryCapture();
     } else {
       await _startPrimaryCapture();
+    }
+  }
+
+  Future<void> _finishBeforeLeavingPage() async {
+    if (_finishingBeforeExit) return;
+    _finishingBeforeExit = true;
+    try {
+      if (_isPrimaryRecordingOn) {
+        await _stopLocalCaptureOnly();
+      }
+      if (_connected) {
+        final finalizeChannel = _channel;
+        await _requestServerFinalize(
+          reason: 'page_exit',
+          waitForComplete: false,
+        );
+        _disconnect(expectedChannel: finalizeChannel);
+      }
+      await _flushSessionPersist();
+    } finally {
+      _finishingBeforeExit = false;
     }
   }
 
@@ -1008,6 +1205,7 @@ class _WsTestPageState extends State<WsTestPage> {
   @override
   void dispose() {
     _socketWritable = false;
+    _completeFinalizeWaiter();
     unawaited(_flutterMicSub?.cancel());
     _flutterMicSub = null;
     unawaited(_nativeMicSub?.cancel());
@@ -1024,6 +1222,7 @@ class _WsTestPageState extends State<WsTestPage> {
     _suggestionScrollController.dispose();
     _outlineCtl.dispose();
     _channel?.sink.close();
+    unawaited(_clearAndroidStatusNotification());
     super.dispose();
   }
 
@@ -1259,6 +1458,7 @@ class _WsTestPageState extends State<WsTestPage> {
       );
 
       setState(() => _flutterMicOn = true);
+      unawaited(_syncAndroidStatusNotification());
       _log('Flutter mic started');
     } catch (e) {
       _log('Start Flutter mic failed: $e');
@@ -1270,6 +1470,7 @@ class _WsTestPageState extends State<WsTestPage> {
       await _flutterMicSub?.cancel();
       _flutterMicSub = null;
       setState(() => _flutterMicOn = false);
+      unawaited(_syncAndroidStatusNotification());
 
       final pcmBytes = _flutterPcmBuffer.toBytes();
       final path = await _savePcmAsWav(
@@ -1347,6 +1548,7 @@ class _WsTestPageState extends State<WsTestPage> {
       }
 
       setState(() => _nativeMicOn = true);
+      unawaited(_syncAndroidStatusNotification());
       _log('$_nativeCaptureLogLabel started');
     } catch (e) {
       await _nativeMicSub?.cancel();
@@ -1419,6 +1621,7 @@ class _WsTestPageState extends State<WsTestPage> {
       if (mounted) {
         setState(() => _nativeMicOn = true);
       }
+      unawaited(_syncAndroidStatusNotification());
       _log('Conversation system audio started in raw PCM compatibility mode');
     } catch (e) {
       await _nativeMicSub?.cancel();
@@ -1474,6 +1677,7 @@ class _WsTestPageState extends State<WsTestPage> {
           _windowsUserMicOn = false;
         }
       });
+      unawaited(_syncAndroidStatusNotification());
 
       final pcmBytes = _nativePcmBuffer.toBytes();
       final path = await _savePcmAsWav(
@@ -1512,24 +1716,30 @@ class _WsTestPageState extends State<WsTestPage> {
         ? _buildWindowsSidebarBody()
         : _buildDefaultBody();
 
-    return Scaffold(
-      backgroundColor: _pageBg,
-      appBar: AppBar(
-        title: Text(l10n.sessionPageTitle),
-        actions: [
-          if (_isWindowsDesktop) _buildWindowsRecordingMenu(l10n),
-          if (_isAndroidSubtitleMode) _buildAndroidSubtitleAudioMenu(l10n),
-        ],
+    return WillPopScope(
+      onWillPop: () async {
+        await _finishBeforeLeavingPage();
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: _pageBg,
+        appBar: AppBar(
+          title: Text(l10n.sessionPageTitle),
+          actions: [
+            if (_isWindowsDesktop) _buildWindowsRecordingMenu(l10n),
+            if (_isAndroidSubtitleMode) _buildAndroidSubtitleAudioMenu(l10n),
+          ],
+        ),
+        body: body,
+        floatingActionButton: _supportsPrimaryCapture
+            ? FloatingActionButton.large(
+                onPressed: () async {
+                  await _togglePrimaryCapture();
+                },
+                child: Icon(_primaryCaptureIcon),
+              )
+            : null,
       ),
-      body: body,
-      floatingActionButton: _supportsPrimaryCapture
-          ? FloatingActionButton.large(
-              onPressed: () async {
-                await _togglePrimaryCapture();
-              },
-              child: Icon(_primaryCaptureIcon),
-            )
-          : null,
     );
   }
 

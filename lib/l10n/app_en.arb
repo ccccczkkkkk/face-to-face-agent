@@ -81,6 +81,19 @@
       "mode": {}
     }
   },
+  "statusRecording": "Recording",
+  "androidNotificationConnected": "Connected - {mode}",
+  "@androidNotificationConnected": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "androidNotificationRecording": "Recording - {mode}",
+  "@androidNotificationRecording": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
   "emptyPlaceholder": "Nothing here yet.",
   "noLogsYet": "No logs yet.",
   "labelImportantEvents": "Important Events",

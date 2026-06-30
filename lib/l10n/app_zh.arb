@@ -81,6 +81,19 @@
       "mode": {}
     }
   },
+  "statusRecording": "录音中",
+  "androidNotificationConnected": "已连接 - {mode}",
+  "@androidNotificationConnected": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "androidNotificationRecording": "录音中 - {mode}",
+  "@androidNotificationRecording": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
   "emptyPlaceholder": "这里还没有内容。",
   "noLogsYet": "还没有日志。",
   "labelImportantEvents": "重要事件",

@@ -7,7 +7,7 @@ import 'app_settings.dart';
 import 'conversation_session.dart';
 import 'l10n/app_localizations.dart';
 import 'session_defaults.dart';
-import 'session_storage.dart';
+import 'session_sync_service.dart';
 import 'ws_test_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -29,22 +29,38 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadSessions() async {
-    final loaded = await SessionStorage.loadSessions();
+    final local = await SessionSyncService.loadLocalSessions();
     if (!mounted) return;
-    loaded.sort((a, b) {
-      final aId = int.tryParse(a.id) ?? 0;
-      final bId = int.tryParse(b.id) ?? 0;
-      return bId.compareTo(aId);
-    });
+    _replaceSessions(local);
+
+    final loaded = await SessionSyncService.loadSessions();
+    if (!mounted) return;
+    _appendNewSessionsOnly(loaded);
+  }
+
+  void _replaceSessions(List<ConversationSession> sessions) {
     setState(() {
       _sessions
         ..clear()
-        ..addAll(loaded);
+        ..addAll(sessions);
     });
   }
 
-  Future<void> _saveSessions() async {
-    await SessionStorage.saveSessions(_sessions);
+  void _appendNewSessionsOnly(List<ConversationSession> sessions) {
+    final existingIds = _sessions.map((session) => session.id).toSet();
+    final additions = sessions
+        .where((session) => !existingIds.contains(session.id))
+        .toList();
+    if (additions.isEmpty) return;
+
+    setState(() {
+      _sessions.addAll(additions);
+      _sessions.sort((a, b) {
+        final createdCompare = b.createdDate.compareTo(a.createdDate);
+        if (createdCompare != 0) return createdCompare;
+        return b.changedDate.compareTo(a.changedDate);
+      });
+    });
   }
 
   Future<Map<String, String>?> _showSessionEditor({
@@ -130,7 +146,7 @@ class _HomePageState extends State<HomePage> {
       session.title = nextTitle;
       session.outline = nextOutline;
     });
-    await _saveSessions();
+    await SessionSyncService.saveSession(session);
   }
 
   Future<void> _deleteSession(ConversationSession session) async {
@@ -157,10 +173,11 @@ class _HomePageState extends State<HomePage> {
 
     if (confirmed != true || !mounted) return;
 
+    await SessionSyncService.deleteSession(session);
+    if (!mounted) return;
     setState(() {
       _sessions.removeWhere((item) => item.id == session.id);
     });
-    await _saveSessions();
   }
 
   Future<void> _showSessionActions(ConversationSession session) async {
@@ -269,7 +286,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _sessions.insert(0, session);
     });
-    await _saveSessions();
+    await SessionSyncService.saveSession(session);
 
     await _openSession(session);
   }
@@ -286,7 +303,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _sessions.insert(0, session);
     });
-    await _saveSessions();
+    await SessionSyncService.saveSession(session);
 
     await _openSession(session);
   }
@@ -299,7 +316,7 @@ class _HomePageState extends State<HomePage> {
 
     if (!mounted) return;
     setState(() {});
-    await _saveSessions();
+    await SessionSyncService.saveSession(session);
   }
 
   Future<void> _showCreateModePicker() async {
@@ -402,11 +419,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   DateTime _sessionDate(ConversationSession session) {
-    final millis = int.tryParse(session.id);
-    if (millis == null) {
-      return DateTime.now();
-    }
-    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    final dt = session.createdDate;
     return DateTime(dt.year, dt.month, dt.day);
   }
 

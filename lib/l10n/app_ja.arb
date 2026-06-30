@@ -81,6 +81,19 @@
       "mode": {}
     }
   },
+  "statusRecording": "録音中",
+  "androidNotificationConnected": "接続中 - {mode}",
+  "@androidNotificationConnected": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "androidNotificationRecording": "録音中 - {mode}",
+  "@androidNotificationRecording": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
   "emptyPlaceholder": "まだ内容はありません。",
   "noLogsYet": "まだログはありません。",
   "labelImportantEvents": "重要な出来事",

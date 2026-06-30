@@ -205,6 +205,19 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get statusRecording => 'Recording';
+
+  @override
+  String androidNotificationConnected(Object mode) {
+    return 'Connected - $mode';
+  }
+
+  @override
+  String androidNotificationRecording(Object mode) {
+    return 'Recording - $mode';
+  }
+
+  @override
   String get emptyPlaceholder => 'Nothing here yet.';
 
   @override

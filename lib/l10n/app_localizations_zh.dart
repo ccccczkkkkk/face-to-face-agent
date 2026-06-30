@@ -200,6 +200,19 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get statusRecording => '录音中';
+
+  @override
+  String androidNotificationConnected(Object mode) {
+    return '已连接 - $mode';
+  }
+
+  @override
+  String androidNotificationRecording(Object mode) {
+    return '录音中 - $mode';
+  }
+
+  @override
   String get emptyPlaceholder => '这里还没有内容。';
 
   @override
